@@ -1,19 +1,19 @@
 :root {
   color-scheme: dark;
-  --bg: #1d1a2c;
-  --panel: #272339;
-  --panel-2: #302b46;
-  --line: #3d3758;
-  --ink: #efebf8;
-  --muted: #a69fc2;
-  --play: #ff5d6c;          /* playhead / record red */
+  --bg: #17123a;
+  --panel: #231c4f;
+  --panel-2: #2e2563;
+  --line: #3f3580;
+  --ink: #f6f3ff;
+  --muted: #b3a9e6;
+  --play: #ff3d71;          /* playhead / record red */
   /* one colour per output track, like editor clip labels */
-  --tr: #a593ff;            /* ترجمة */
-  --mm: #39c9b2;            /* خريطة ذهنية */
-  --sl: #f3b33f;            /* سلايدز */
-  --ar: #f27ba0;            /* عربي */
-  --pr: #59aef2;            /* للمقدم */
-  --en: #a8d65c;            /* English */
+  --tr: #9b7bff;            /* ترجمة */
+  --mm: #18e6c4;            /* خريطة ذهنية */
+  --sl: #ffc12e;            /* سلايدز */
+  --ar: #ff5fa8;            /* عربي */
+  --pr: #3cb4ff;            /* للمقدم */
+  --en: #a6f04a;            /* English */
   --r: 14px;
   --side: 232px;
   --ease: cubic-bezier(.2, .8, .2, 1);
@@ -358,11 +358,11 @@ body.loading .num, body.loading .count { color: transparent; background: linear-
    ===================================================================== */
 /* ambient: four soft lights drifting like out-of-focus bokeh behind everything */
 .ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
-.ambient i { position: absolute; width: 46vmax; height: 46vmax; border-radius: 50%; filter: blur(90px); opacity: .16; animation: drift 26s ease-in-out infinite alternate; }
+.ambient i { position: absolute; width: 46vmax; height: 46vmax; border-radius: 50%; filter: blur(90px); opacity: .32; animation: drift 26s ease-in-out infinite alternate; }
 .ambient i:nth-child(1) { background: var(--tr); top: -14vmax; right: -10vmax; }
 .ambient i:nth-child(2) { background: var(--mm); bottom: -18vmax; left: -12vmax; animation-duration: 32s; animation-delay: -8s; }
-.ambient i:nth-child(3) { background: var(--ar); top: 30%; left: 35%; width: 30vmax; height: 30vmax; opacity: .09; animation-duration: 38s; animation-delay: -15s; }
-.ambient i:nth-child(4) { background: var(--sl); bottom: 10%; right: 20%; width: 24vmax; height: 24vmax; opacity: .08; animation-duration: 29s; animation-delay: -4s; }
+.ambient i:nth-child(3) { background: var(--ar); top: 30%; left: 35%; width: 30vmax; height: 30vmax; opacity: .2; animation-duration: 38s; animation-delay: -15s; }
+.ambient i:nth-child(4) { background: var(--sl); bottom: 10%; right: 20%; width: 24vmax; height: 24vmax; opacity: .18; animation-duration: 29s; animation-delay: -4s; }
 @keyframes drift { 0% { transform: translate(0, 0) scale(1); } 50% { transform: translate(6vmax, -5vmax) scale(1.15); } 100% { transform: translate(-5vmax, 6vmax) scale(.92); } }
 body { background-color: var(--bg); }
 .card { background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(6px); }
@@ -383,12 +383,12 @@ body { background-color: var(--bg); }
 /* hero: brighter playhead with a light trail, flipping digits */
 .playhead { box-shadow: 0 0 14px 2px color-mix(in srgb, var(--play) 60%, transparent); }
 .playhead::after { content: ""; position: absolute; top: 0; bottom: 0; right: 2px; width: 90px; background: linear-gradient(270deg, color-mix(in srgb, var(--play) 22%, transparent), transparent); pointer-events: none; }
-.count .d { display: inline-block; min-width: .6em; text-align: center; }
+.count .d { display: inline-block; text-align: center; }
 .count .d.flip { animation: flip .45s var(--ease); }
 @keyframes flip { 0% { transform: translateY(-40%) rotateX(70deg); opacity: 0; } 100% { transform: none; opacity: 1; } }
 .lanes { display: grid; gap: 6px; margin-top: 1rem; direction: ltr; }
-.lane { display: grid; grid-template-columns: 1fr 52px; align-items: center; gap: 8px; }
-.lane b { font-size: .68rem; color: var(--muted); font-weight: 500; text-align: right; direction: rtl; }
+.lane { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; }
+.lane b { font-size: .68rem; color: var(--muted); font-weight: 500; text-align: left; direction: rtl; }
 .lane-track { position: relative; height: 16px; border-radius: 5px; background: #ffffff06; overflow: hidden; }
 .lane-track i { position: absolute; top: 2px; bottom: 2px; border-radius: 4px; background: color-mix(in srgb, var(--c) 55%, transparent); border: 1px solid var(--c); transform-origin: left; animation: clipin .8s var(--ease) both; }
 .lane-track i::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 5px, #ffffff22 5px 6px); }
@@ -490,3 +490,30 @@ dialog.palette[open] { transform: none; }
 #palList li.on, #palList li:hover { background: var(--panel-2); }
 #palList li i { width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--muted)); flex: 0 0 auto; }
 @media (max-width: 760px) { .palbtn { display: none; } }
+
+/* ---------- vivid layer: gradient accents ---------- */
+:root { --grad: linear-gradient(120deg, var(--tr), var(--ar) 45%, var(--sl)); --grad2: linear-gradient(120deg, var(--mm), var(--pr)); }
+.btn:not(.ghost), .pick { background: var(--grad); color: #fff !important; box-shadow: 0 6px 20px -8px var(--ar); }
+.btn:not(.ghost):hover, .pick:hover { filter: brightness(1.1) saturate(1.1); }
+.chip.on { background: var(--grad2); color: #0f0b2a; border-color: transparent; }
+.card { border-color: color-mix(in srgb, var(--tr) 22%, var(--line)); }
+.day { background: radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--tr) 35%, transparent), transparent 60%), radial-gradient(90% 120% at 0% 100%, color-mix(in srgb, var(--mm) 22%, transparent), transparent 60%), var(--panel); }
+.count { background: linear-gradient(90deg, var(--ink), color-mix(in srgb, var(--pr) 70%, var(--ink))); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.count .d { color: inherit; }
+.nav a.on { background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--tr) 30%, var(--panel-2))); }
+.side { background: color-mix(in srgb, #120d30 85%, transparent); }
+.top { background: color-mix(in srgb, var(--bg) 75%, transparent); }
+.cmd svg { stroke: var(--mm); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--mm) 60%, transparent)); }
+.cmd:nth-child(2) svg { stroke: var(--pr); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--pr) 60%, transparent)); }
+.cmd:nth-child(3) svg { stroke: var(--sl); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--sl) 60%, transparent)); }
+.cmd:nth-child(4) svg { stroke: var(--ar); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--ar) 60%, transparent)); }
+.kpi:nth-child(1) { background: linear-gradient(135deg, color-mix(in srgb, var(--mm) 18%, var(--panel)), var(--panel)); }
+.kpi:nth-child(2) { background: linear-gradient(135deg, color-mix(in srgb, var(--sl) 18%, var(--panel)), var(--panel)); }
+.kpi:nth-child(3) { background: linear-gradient(135deg, color-mix(in srgb, var(--ar) 18%, var(--panel)), var(--panel)); }
+.kpi:nth-child(4) { background: linear-gradient(135deg, color-mix(in srgb, var(--tr) 22%, var(--panel)), var(--panel)); }
+.bars span { background: linear-gradient(180deg, var(--ar), var(--tr) 60%, color-mix(in srgb, var(--pr) 50%, transparent)); }
+.knob { background: var(--line); }
+.pilot input:checked + .knob { background: var(--grad2); box-shadow: 0 0 14px -2px var(--mm); }
+.splash { background: radial-gradient(60% 60% at 50% 45%, color-mix(in srgb, var(--tr) 30%, transparent), var(--bg)); }
+.frame.done { background: linear-gradient(135deg, color-mix(in srgb, var(--c) 70%, transparent), color-mix(in srgb, var(--c) 35%, transparent)); color: #fff; font-weight: 600; box-shadow: 0 0 12px -4px var(--c); }
+.book-head h2 { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
