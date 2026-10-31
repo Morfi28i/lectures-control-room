@@ -14,6 +14,17 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="splash" id="splash" aria-hidden="true">
+  <svg viewBox="0 0 512 512" width="96" height="96"><rect width="512" height="512" rx="112" fill="#272339"/><rect class="sb s1" x="88" y="150" width="336" height="44" rx="22" fill="#a593ff"/><rect class="sb s2" x="88" y="234" width="236" height="44" rx="22" fill="#39c9b2"/><rect class="sb s3" x="88" y="318" width="290" height="44" rx="22" fill="#f3b33f"/><g class="sph"><rect x="268" y="96" width="14" height="330" rx="7" fill="#ff5d6c"/><path d="M245 82h60l-30 38z" fill="#ff5d6c"/></g></svg>
+  <p>غرفة تحكم المحاضرات</p>
+</div>
+<dialog class="palette" id="palette" aria-label="الأوامر">
+  <input id="palInput" placeholder="اكتب أمر أو اسم محاضرة…" autocomplete="off">
+  <ul id="palList"></ul>
+  <p class="muted small">↑ ↓ للتنقل · Enter للتنفيذ · Esc للقفل</p>
+</dialog>
+<div class="ambient" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+<canvas id="fx" aria-hidden="true"></canvas>
 <div class="app">
   <!-- sidebar on desktop, bottom tab bar on phones -->
   <nav class="side" aria-label="الأقسام">
@@ -30,6 +41,7 @@
       <li><a href="#/rules" data-route="rules"><svg viewBox="0 0 24 24"><path d="M7 4h10v16H7zM10 8h4M10 12h4M10 16h2"/></svg><span>الثوابت</span></a></li>
       <li><a href="#/settings" data-route="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><span>الإعدادات</span></a></li>
     </ul>
+    <button class="palbtn" id="palBtn"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4-4"/></svg><span>بحث وأوامر</span><kbd>⌘K</kbd></button>
     <div class="side-foot">
       <span class="dot" id="connDot"></span><span id="connText">بيتوصل…</span>
     </div>
@@ -72,6 +84,12 @@
             <div class="ticks" id="ticks"></div>
             <div class="playhead" id="playhead"><span id="nowLabel"></span></div>
           </div>
+          <div class="lanes" aria-hidden="true">
+            <div class="lane"><b>ترجمة</b><div class="lane-track" style="--c:var(--tr)"></div></div>
+            <div class="lane"><b>خريطة</b><div class="lane-track" style="--c:var(--mm)"></div></div>
+            <div class="lane"><b>سلايدز</b><div class="lane-track" style="--c:var(--sl)"></div></div>
+            <div class="lane"><b>عربي</b><div class="lane-track" style="--c:var(--ar)"></div></div>
+          </div>
         </div>
 
         <div class="kpis">
@@ -79,6 +97,23 @@
           <a class="kpi card" href="#/books"><svg class="ring" viewBox="0 0 44 44"><circle r="18" cx="22" cy="22"/><circle class="arc" r="18" cx="22" cy="22" id="ringBooks" style="--c:var(--sl)"/></svg><div><b class="num" id="kBooks">0</b><span>جزء كتاب جاهز من <i id="kBooksAll">0</i></span></div></a>
           <a class="kpi card" href="#/inbox"><svg class="ring" viewBox="0 0 44 44"><circle r="18" cx="22" cy="22"/><circle class="arc" r="18" cx="22" cy="22" id="ringInbox" style="--c:var(--ar)"/></svg><div><b class="num" id="kInbox">0</b><span>ملف في الوارد مستني</span></div></a>
           <div class="kpi card"><svg class="ring" viewBox="0 0 44 44"><circle r="18" cx="22" cy="22"/><circle class="arc" r="18" cx="22" cy="22" id="ringPdf" style="--c:var(--tr)"/></svg><div><b class="num" id="kPdf">0</b><span>ملف PDF على الماك</span></div></div>
+        </div>
+
+        <div class="charts">
+          <div class="card chart-card">
+            <h2>الملفات حسب النوع</h2>
+            <div class="donut-wrap"><svg class="donut" id="donut" viewBox="0 0 120 120"></svg><div class="donut-center"><b id="donutTotal">0</b><span>ملف</span></div></div>
+            <ul class="donut-legend" id="donutLegend"></ul>
+          </div>
+          <div class="card chart-card">
+            <h2>نشاط آخر ١٤ يوم</h2>
+            <div class="bars" id="activityBars"></div>
+            <p class="muted small" id="activityNote"></p>
+          </div>
+          <div class="card chart-card">
+            <h2>المواد</h2>
+            <div class="hbars" id="subjectBars"></div>
+          </div>
         </div>
 
         <div class="deck">

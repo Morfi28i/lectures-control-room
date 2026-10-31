@@ -113,6 +113,7 @@ function renderHome() {
   countTo($('#kBooks'), bDone); $('#kBooksAll').textContent = ar.format(bNeed); ring($('#ringBooks'), bDone / (bNeed || 1));
   countTo($('#kInbox'), pend); ring($('#ringInbox'), pend ? 1 : 0);
   countTo($('#kPdf'), S.pdfs); ring($('#ringPdf'), 1);
+  drawLanes(); drawDonut(); drawActivity(); drawSubjects();
 }
 function tick() {
   if (!S) return;
@@ -123,7 +124,7 @@ function tick() {
   const next = S.schedule.map((h) => { const d = new Date(now); d.setHours(h, 0, 0, 0); return d; }).find((d) => d > now)
     || (() => { const d = new Date(now); d.setDate(d.getDate() + 1); d.setHours(S.schedule[0], 0, 0, 0); return d; })();
   const s = Math.max(0, Math.round((next - now) / 1000)), p = (n) => String(n).padStart(2, '0');
-  $('#countdown').textContent = S.paused ? 'واقف' : `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`;
+  setCount(S.paused ? 'واقف' : `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`);
   $('#nextLabel').textContent = S.paused ? 'الطيار الآلي متوقف، الدورات هتعدّي من غير شغل لحد ما تشغّله تاني.' : `الساعة ${time.format(next)}: هيسحب الجديد، يعمل كل الملفات، ويرفعها.`;
   $$('.run').forEach((el) => {
     const h = +el.dataset.h, isNext = next.getHours() === h && next.getDate() === now.getDate();
@@ -151,6 +152,7 @@ function renderSubjects() {
   });
   const groups = new Map();
   for (const i of list) { if (!groups.has(i.subject)) groups.set(i.subject, []); groups.get(i.subject).push(i); }
+  let ci = 0;
   $('#trackList').innerHTML = !groups.size
     ? `<p class="empty">${filter === 'miss' ? 'مفيش أي محاضرة ناقصة. كله جاهز.' : 'مفيش نتايج للبحث ده.'}</p>`
     : [...groups].map(([g, items]) => {
@@ -158,7 +160,7 @@ function renderSubjects() {
       return `<div class="track">
         <div class="track-name"><b>${esc(g)}</b><small>${ar.format(L.length)} محاضرة · ${ar.format(ok)} كاملة</small><div class="bar-mini"><i data-w="${pct}"></i></div></div>
         <div class="clips">${items.map((i) => `
-          <button class="clip ${!i.lecture ? 'ref' : i.missing.length ? 'miss' : ''}" data-id="${i.id}">
+          <button class="clip ${!i.lecture ? 'ref' : i.missing.length ? 'miss' : ''}" data-id="${i.id}" style="--i:${ci++}">
             <span class="t">${esc(i.name)}</span><span class="tag">${i.lecture ? (i.lang === 'ar' ? 'عربي' : 'EN') : 'مراجع'}</span>
             <span class="keys">${keysHTML(i)}</span>
           </button>`).join('')}</div></div>`;
@@ -204,7 +206,7 @@ $('#drawer').addEventListener('click', (e) => { if (e.target === e.currentTarget
 
 // ---------- books ----------
 function renderBooks() {
-  let i = 0;
+  let i = 0, bi = 0;
   $('#books').innerHTML = BOOKS.map((b) => {
     const pct = b.need ? b.done / b.need : 0;
     const parts = b.parts.map((p) => `
@@ -213,7 +215,7 @@ function renderBooks() {
           <span class="frame ${p.src ? 'done' : ''}" style="--c:var(--sl);--i:${i++}">${b.lang === 'ar' ? 'عربي' : 'EN'}</span>
           ${p.ar === null ? '' : `<span class="frame ${p.ar ? 'done' : ''}" style="--c:var(--ar);--i:${i++}">عربي</span>`}
         </div></div>`).join('');
-    return `<article class="book card">
+    return `<article class="book card tilt ${pct === 1 ? 'complete' : ''}" style="--i:${bi++}">
       <div class="book-head">
         <div class="pct"><svg class="ring" viewBox="0 0 44 44"><circle r="18" cx="22" cy="22"/><circle class="arc" r="18" cx="22" cy="22" data-f="${pct}" style="--c:${pct === 1 ? 'var(--mm)' : 'var(--sl)'}"/></svg><b>${ar.format(Math.round(pct * 100))}٪</b></div>
         <div><h2>${esc(b.base)}</h2><small>${esc(b.subject)} · ${ar.format(b.parts.length)} ${b.parts.length > 1 ? 'أجزاء' : 'جزء'}</small></div>
@@ -279,7 +281,7 @@ function renderHistory() {
     })),
   ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 60);
   $('#history').innerHTML = rows.length
-    ? rows.map((r) => `<li style="--c:${r.c}"><div><b>${esc(r.t)}</b><small>${esc(r.d || '')}</small></div><time>${dayTime.format(new Date(r.at))}</time></li>`).join('')
+    ? rows.map((r, n) => `<li style="--c:${r.c};--i:${Math.min(n, 20)}"><div><b>${esc(r.t)}</b><small>${esc(r.d || '')}</small></div><time>${dayTime.format(new Date(r.at))}</time></li>`).join('')
     : '<li class="muted">لسه مفيش حاجة اتعملت من اللوحة.</li>';
 }
 
@@ -305,6 +307,7 @@ function attach(action) {
     st.textContent = code === 0 ? 'خلص تمام' : code === 'cancelled' ? 'اتوقف' : 'خلص بمشكلة، بص على الشاشة';
     if (!$('#log').textContent.trim()) logLine(code === 'cancelled' ? 'اتوقف قبل ما يخلص.' : action === 'pull' ? 'مفيش جديد.' : 'كله متطابق، مفيش حاجة ناقصة.');
     toast(code === 0 ? (ACTION_NAME[action] || action) + ': خلص' : code === 'cancelled' ? 'اتوقف' : 'حصلت مشكلة');
+    if (code === 0) burst(document.querySelector(`[data-run="${action}"]`));
     load();
   });
   es.onerror = () => { es.close(); streaming = false; setBusy(null); };
@@ -358,7 +361,158 @@ $('#saveRules').addEventListener('click', async () => {
 // ---------- boot ----------
 document.body.classList.add('loading');
 go();
-load().then(() => go());
+load().then(() => go()).finally(() => hideSplash?.());
 loadRules().catch(() => {});
 setInterval(() => { if (!streaming && !document.hidden && !$('#drawer').open && !(route === 'rules' && rulesDirty)) load(); }, 20000);
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+
+// =====================================================================
+// MORE VISUALS
+// =====================================================================
+// countdown digits flip one by one when they change, like a slate counter
+function setCount(text) {
+  const el = $('#countdown');
+  if (el.dataset.t === text) return;
+  const prev = el.dataset.t || ''; el.dataset.t = text;
+  if (!/^\d/.test(text) || prev.length !== text.length) { el.innerHTML = [...text].map((c) => `<span class="d">${c}</span>`).join(''); return; }
+  const ds = el.querySelectorAll('.d');
+  [...text].forEach((c, n) => { if (prev[n] !== c && ds[n]) { ds[n].textContent = c; ds[n].classList.remove('flip'); void ds[n].offsetWidth; ds[n].classList.add('flip'); } });
+}
+
+// editor lanes: every output made today/recently appears as a clip at the hour it was made
+function drawLanes() {
+  const lanes = { tr: 0, mm: 1, sl: 2, ar: 3 }, tracks = $$('.lane-track');
+  if (!tracks.length) return;
+  tracks.forEach((t) => (t.innerHTML = ''));
+  const day = Date.now() - 86400e3, clips = [];
+  for (const it of S.items) for (const [k, names] of Object.entries(it.outputs)) {
+    if (!(k in lanes)) continue;
+    if (it.mtime > day) clips.push({ lane: lanes[k], at: new Date(it.mtime) });
+  }
+  // when nothing happened in the last day, show the schedule as planned clips
+  const src = clips.length ? clips : S.schedule.flatMap((h) => [0, 1, 2, 3].map((l) => ({ lane: l, at: new Date(2000, 0, 1, h, l * 12), planned: true })));
+  src.forEach((c, n) => {
+    const x = ((c.at.getHours() * 60 + c.at.getMinutes()) / 1440) * 100;
+    const i = document.createElement('i');
+    i.style.left = `${x}%`; i.style.width = `${c.planned ? 4.2 : 2.2}%`; i.style.animationDelay = `${n * 40}ms`;
+    if (c.planned) i.style.opacity = '.45';
+    tracks[c.lane]?.append(i);
+  });
+}
+
+// donut: how many files of each output type exist
+function drawDonut() {
+  const counts = KEYS.map(([k, n]) => [k, n, S.items.reduce((a, it) => a + (it.outputs[k]?.length || 0), 0)]).filter((r) => r[2]);
+  const total = counts.reduce((a, r) => a + r[2], 0), C = 2 * Math.PI * 46;
+  let off = 0;
+  $('#donut').innerHTML = `<circle r="46" cx="60" cy="60" style="stroke:var(--line)"/>` + counts.map(([k, n, v]) => {
+    const len = (v / total) * C, seg = `<circle r="46" cx="60" cy="60" style="stroke:var(--${k})" stroke-dasharray="0 ${C}" data-d="${Math.max(0, len - 2)} ${C}" stroke-dashoffset="${-off}"><title>${n}: ${v}</title></circle>`;
+    off += len; return seg;
+  }).join('');
+  requestAnimationFrame(() => requestAnimationFrame(() => $$('#donut [data-d]').forEach((c) => c.setAttribute('stroke-dasharray', c.dataset.d))));
+  countTo($('#donutTotal'), total);
+  $('#donutLegend').innerHTML = counts.map(([k, n, v]) => `<li style="--c:var(--${k})"><i></i>${n}<b>${ar.format(v)}</b></li>`).join('');
+}
+
+// activity: files touched per day over the last two weeks
+function drawActivity() {
+  const days = [...Array(14)].map((_, n) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 13 + n); return d; });
+  const counts = days.map(() => 0);
+  for (const it of S.items) { const idx = days.findIndex((d, n) => it.mtime >= d && (n === 13 || it.mtime < days[n + 1])); if (idx >= 0) counts[idx] += Object.values(it.outputs).flat().length || 1; }
+  for (const a of S.actions) { const t = new Date(a.at); const idx = days.findIndex((d, n) => t >= d && (n === 13 || t < days[n + 1])); if (idx >= 0) counts[idx]++; }
+  const max = Math.max(1, ...counts), fmt = new Intl.DateTimeFormat('ar-EG', { weekday: 'short', day: 'numeric' });
+  $('#activityBars').innerHTML = counts.map((c, n) => `<span class="${c ? '' : 'zero'}" style="--h:${(c / max) * 100}%;--i:${n}"><em>${fmt.format(days[n])} · ${ar.format(c)}</em></span>`).join('');
+  const sum = counts.reduce((a, b) => a + b, 0);
+  $('#activityNote').textContent = `${ar.format(sum)} حركة في الأسبوعين اللي فاتوا، وأعلى يوم فيه ${ar.format(max)}.`;
+}
+
+// subjects: completion per subject as horizontal bars
+function drawSubjects() {
+  const L = S.items.filter((i) => i.lecture && !i.inUnsorted), subs = [...new Set(L.map((i) => i.subject))];
+  const colors = ['tr', 'mm', 'sl', 'ar', 'pr', 'en'];
+  $('#subjectBars').innerHTML = subs.map((s, n) => {
+    const x = L.filter((i) => i.subject === s), ok = x.filter((i) => !i.missing.length).length, pct = x.length ? (ok / x.length) * 100 : 0;
+    return `<a class="hbar" href="#/subjects" style="text-decoration:none;color:inherit"><div><b>${esc(s)}</b><span>${ar.format(ok)}/${ar.format(x.length)}</span></div><span class="tr"><i style="width:${pct}%;--c:var(--${colors[n % colors.length]});--i:${n}"></i></span></a>`;
+  }).join('');
+}
+
+// spotlight + tilt follow the pointer
+document.addEventListener('pointermove', (e) => {
+  const el = e.target.closest?.('.card, .cmd, .clip'); if (!el) return;
+  const r = el.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  el.style.setProperty('--mx', `${x}px`); el.style.setProperty('--my', `${y}px`);
+  if (!reduced && el.classList.contains('tilt')) { el.style.setProperty('--ry', `${((x / r.width) - .5) * 7}deg`); el.style.setProperty('--rx', `${(.5 - y / r.height) * 7}deg`); }
+}, { passive: true });
+document.addEventListener('pointerout', (e) => { const el = e.target.closest?.('.tilt'); if (el && !el.contains(e.relatedTarget)) { el.style.setProperty('--rx', '0deg'); el.style.setProperty('--ry', '0deg'); } });
+$$('.kpi, .cmd').forEach((el) => el.classList.add('tilt'));
+
+// command buttons: ripple where you click + equalizer while running
+$$('.cmd').forEach((b) => {
+  b.insertAdjacentHTML('beforeend', '<span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>');
+  b.addEventListener('pointerdown', (e) => {
+    const r = b.getBoundingClientRect(), s = Math.max(r.width, r.height), d = document.createElement('span');
+    d.className = 'ripple'; d.style.cssText = `width:${s}px;height:${s}px;left:${e.clientX - r.left - s / 2}px;top:${e.clientY - r.top - s / 2}px`;
+    b.append(d); setTimeout(() => d.remove(), 700);
+  });
+});
+
+// particle burst (canvas) when a job finishes well
+const fx = $('#fx'), g = fx.getContext('2d'); let parts = [];
+function sizeFx() { fx.width = innerWidth * devicePixelRatio; fx.height = innerHeight * devicePixelRatio; }
+sizeFx(); addEventListener('resize', sizeFx);
+function burst(el) {
+  if (reduced || !el) return;
+  const r = el.getBoundingClientRect(), cx = (r.left + r.width / 2) * devicePixelRatio, cy = (r.top + r.height / 2) * devicePixelRatio;
+  const cols = ['#a593ff', '#39c9b2', '#f3b33f', '#f27ba0', '#59aef2', '#a8d65c'];
+  for (let n = 0; n < 70; n++) { const a = Math.random() * Math.PI * 2, v = (2 + Math.random() * 6) * devicePixelRatio; parts.push({ x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 3 * devicePixelRatio, life: 1, c: cols[n % cols.length], s: (3 + Math.random() * 4) * devicePixelRatio, rot: Math.random() * 6 }); }
+  if (parts.length === 70) requestAnimationFrame(fxLoop);
+}
+function fxLoop() {
+  g.clearRect(0, 0, fx.width, fx.height);
+  parts = parts.filter((p) => p.life > 0);
+  for (const p of parts) {
+    p.x += p.vx; p.y += p.vy; p.vy += .25 * devicePixelRatio; p.vx *= .98; p.life -= .016; p.rot += .2;
+    g.save(); g.globalAlpha = Math.max(0, p.life); g.translate(p.x, p.y); g.rotate(p.rot); g.fillStyle = p.c; g.fillRect(-p.s / 2, -p.s / 4, p.s, p.s / 2); g.restore();
+  }
+  if (parts.length) requestAnimationFrame(fxLoop); else g.clearRect(0, 0, fx.width, fx.height);
+}
+
+// splash: fades out once the first data is in
+const splashT0 = performance.now();
+function hideSplash() { setTimeout(() => $('#splash').classList.add('gone'), Math.max(0, 1100 - (performance.now() - splashT0))); }
+
+
+// command palette: jump anywhere or run anything from the keyboard
+const PAL = () => [
+  ...Object.entries(PAGES).map(([k, v]) => ({ t: `روح لـ ${v}`, s: 'صفحة', c: 'var(--pr)', run: () => (location.hash = '#/' + k) })),
+  ...Object.entries(ACTION_NAME).map(([k, v]) => ({ t: v, s: 'أمر', c: 'var(--mm)', run: () => $(`[data-run="${k}"]`).click() })),
+  { t: S?.paused ? 'شغّل الطيار الآلي' : 'وقّف الطيار الآلي', s: 'أمر', c: 'var(--sl)', run: () => $('#pilot').click() },
+  { t: 'افتح فولدر المحاضرات', s: 'أمر', c: 'var(--sl)', run: () => $('#openRoot').click() },
+  ...(S ? S.items.filter((i) => !i.inUnsorted).map((i) => ({ t: i.name, s: i.subject, c: i.missing.length ? 'var(--sl)' : 'var(--mm)', run: () => openDrawer(i) })) : []),
+  ...BOOKS.map((b) => ({ t: b.base, s: 'كتاب', c: 'var(--ar)', run: () => (location.hash = '#/books') })),
+];
+let palItems = [], palOn = 0;
+function palRender() {
+  const q = $('#palInput').value.trim().toLowerCase();
+  palItems = PAL().filter((x) => !q || (x.t + ' ' + x.s).toLowerCase().includes(q)).slice(0, 40);
+  palOn = Math.min(palOn, Math.max(0, palItems.length - 1));
+  $('#palList').innerHTML = palItems.length ? palItems.map((x, n) => `<li class="${n === palOn ? 'on' : ''}" data-n="${n}" style="--c:${x.c};animation-delay:${Math.min(n, 12) * 18}ms"><i></i>${esc(x.t)}<small>${esc(x.s)}</small></li>`).join('') : '<li class="muted">مفيش نتايج</li>';
+  $('#palList li.on')?.scrollIntoView({ block: 'nearest' });
+}
+function palOpen() { $('#palInput').value = ''; palOn = 0; palRender(); $('#palette').showModal(); $('#palInput').focus(); }
+function palRun(n) { const x = palItems[n]; if (!x) return; $('#palette').close(); x.run(); }
+$('#palBtn').addEventListener('click', palOpen);
+$('#palInput').addEventListener('input', () => { palOn = 0; palRender(); });
+$('#palInput').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { palOn = Math.min(palItems.length - 1, palOn + 1); palRender(); e.preventDefault(); }
+  if (e.key === 'ArrowUp') { palOn = Math.max(0, palOn - 1); palRender(); e.preventDefault(); }
+  if (e.key === 'Enter') palRun(palOn);
+});
+$('#palList').addEventListener('click', (e) => { const li = e.target.closest('li[data-n]'); if (li) palRun(+li.dataset.n); });
+$('#palette').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('#palette').open ? $('#palette').close() : palOpen(); }
+  // 1..7 jump between pages when not typing
+  if (!e.metaKey && !e.ctrlKey && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) && /^[1-7]$/.test(e.key)) location.hash = '#/' + Object.keys(PAGES)[+e.key - 1];
+});
