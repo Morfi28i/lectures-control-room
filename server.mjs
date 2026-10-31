@@ -16,6 +16,8 @@ const UNSORTED = path.join(ROOT, 'unsorted');
 const LOGS = path.join(KIT, 'logs');
 const PAUSED = path.join(KIT, 'PAUSED');
 const QUEUE = path.join(KIT, 'queue.json');
+const REMOTE = 'gdfull:1st Physics Group (B)';
+const AUTOSYNC = path.join(KIT, 'AUTOSYNC');
 const SCHEDULE = [9, 15, 21]; // hours of the 3 daily autopilot runs (set in the Claude app's scheduled task)
 const RULES = {
   runbook: path.join(KIT, 'RUNBOOK.md'),
@@ -102,12 +104,16 @@ const ACTIONS = {
   push: { label: 'رفع الجديد على الدرايف', cmd: ['sh', [path.join(KIT, 'push.sh')]] },
   check: { label: 'فحص تطابق الدرايف', cmd: ['rclone', ['check', UNSORTED, 'gdfull:1st Physics Group (B)/unsorted', '--one-way', '--exclude', '.DS_Store']] },
   checkall: { label: 'فحص تطابق كل المحاضرات', cmd: ['rclone', ['check', ROOT, 'gdfull:1st Physics Group (B)', '--one-way', '--exclude', '.DS_Store', '--exclude', '*.md']] },
+  runnow: { label: 'تشغيل الخطوات دلوقتي', drive: true, cmd: ['sh', ['-c', `sh "${path.join(KIT, 'inbox.sh')}"; echo "— رفع —"; sh "${path.join(KIT, 'push.sh')}"; echo "خلص"`]] },
+  pushall: { label: 'رفع كل الجديد من الماك على الدرايف', drive: true, cmd: ['rclone', ['copy', ROOT, REMOTE, '--exclude', '.DS_Store', '--tpslimit', '2', '--transfers', '2', '--retries', '10', '--low-level-retries', '30', '-v', '--stats-one-line', '--stats', '15s']] },
+  pullall: { label: 'تنزيل الجديد من الدرايف على الماك', drive: true, cmd: ['rclone', ['copy', REMOTE, ROOT, '--ignore-existing', '--exclude', '.DS_Store', '--tpslimit', '4', '-v', '--stats-one-line', '--stats', '15s']] },
 };
+const REMOTE_OF = (rel) => (rel ? `${REMOTE}/${rel}` : REMOTE);
 let job = null; // { id, action, lines[], done, code, clients:Set }
 
-function startJob(action) {
+function startJob(action, custom) {
   if (job && !job.done) return { error: 'في عملية شغالة دلوقتي، استنى لما تخلص' };
-  const a = ACTIONS[action];
+  const a = custom || ACTIONS[action];
   if (!a) return { error: 'أمر مش معروف' };
   job = { id: randomUUID(), action, label: a.label, lines: [], done: false, code: null, started: Date.now(), clients: new Set() };
   const j = job;
@@ -119,11 +125,63 @@ function startJob(action) {
   p.on('error', (e) => push('خطأ: ' + e.message));
   p.on('close', (code) => {
     j.done = true; j.code = j.cancelled ? 'cancelled' : code;
+    if (a.drive) setTimeout(() => driveIndex(true), 1500);
     logAction({ type: 'job', action, label: a.label, code: j.code, secs: Math.round((Date.now() - j.started) / 1000), tail: j.lines.slice(-6) });
     for (const c of j.clients) { c.write(`event: end\ndata: ${JSON.stringify({ code: j.code })}\n\n`); c.end(); }
   });
   return { id: j.id };
 }
+// ---------- Drive mirror: what is on Drive vs on the Mac (cached, refreshed after Drive jobs) ----------
+let drive = { at: 0, files: null, dirs: {}, indexing: false };
+function driveIndex(force) {
+  if (drive.indexing || (!force && drive.files && Date.now() - drive.at < 300e3)) return drive;
+  drive.indexing = true;
+  const p = spawn('rclone', ['lsjson', '-R', REMOTE, '--fast-list', '--no-mimetype'], { env: ENV });
+  let out = '';
+  const t = setTimeout(() => p.kill('SIGTERM'), 180e3);
+  p.stdout.on('data', (d) => (out += d));
+  p.on('close', () => {
+    clearTimeout(t);
+    try {
+      const list = JSON.parse(out), files = {}, dirs = {};
+      for (const f of list) { if (f.IsDir) dirs[f.Path] = f.ID; else if (!/(^|\/)\.DS_Store$/.test(f.Path)) files[f.Path] = { size: f.Size, id: f.ID }; }
+      drive = { at: Date.now(), files, dirs, indexing: false };
+    } catch { drive.indexing = false; drive.error = 'تعذّر قراءة الدرايف'; }
+  });
+  return drive;
+}
+function localFiles() {
+  const out = {};
+  (function walk(d) {
+    let ents; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) { if (e.name.startsWith('.')) continue; const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (e.isFile()) out[path.relative(ROOT, p)] = fs.statSync(p).size; }
+  })(ROOT);
+  return out;
+}
+function syncState() {
+  driveIndex();
+  const local = localFiles(), status = {}, lists = { local: [], drive: [], diff: [] };
+  let both = 0;
+  if (drive.files) {
+    for (const [rel, size] of Object.entries(local)) {
+      const d = drive.files[rel];
+      if (!d) { status[rel] = 'local'; lists.local.push(rel); }
+      else if (d.size !== size && !rel.endsWith('.md')) { status[rel] = 'diff'; lists.diff.push(rel); }
+      else { status[rel] = 'both'; both++; }
+    }
+    for (const rel of Object.keys(drive.files)) if (!(rel in local)) { status[rel] = 'drive'; lists.drive.push(rel); }
+  }
+  const ids = {}; if (drive.files) for (const [rel, f] of Object.entries(drive.files)) ids[rel] = f.id;
+  return { at: drive.at, indexing: drive.indexing, ready: !!drive.files, error: drive.error, counts: { both, local: lists.local.length, drive: lists.drive.length, diff: lists.diff.length }, lists, status, ids, dirs: drive.dirs, auto: fs.existsSync(AUTOSYNC) };
+}
+// auto sync: every 10 minutes, push anything that exists only on the Mac (when switched on)
+setInterval(() => {
+  if (!fs.existsSync(AUTOSYNC) || (job && !job.done) || !drive.files) return;
+  const s = syncState();
+  if (s.counts.local || s.counts.diff) { logAction({ type: 'autosync', files: s.counts.local + s.counts.diff }); startJob('pushall'); }
+}, 600e3);
+driveIndex(true);
+
 function cancelJob() {
   if (!job || job.done) return false;
   job.cancelled = true;
@@ -223,6 +281,29 @@ http.createServer(async (req, res) => {
       return fs.createReadStream(f).pipe(res);
     }
     if (r === '/api/books') return send(res, 200, books());
+    if (r === '/api/sync') { if (u.searchParams.has('rescan')) driveIndex(true); return send(res, 200, syncState()); }
+    if (r === '/api/sync/folder' && req.method === 'POST') {
+      const { rel, dir } = JSON.parse(await body(req));
+      const p = safePath(rel); const relN = path.relative(ROOT, p);
+      const name = relN.split(path.sep).pop() || 'كل الفولدرات';
+      const cmd = dir === 'down'
+        ? ['rclone', ['copy', REMOTE_OF(relN), p, '--ignore-existing', '--exclude', '.DS_Store', '-v']]
+        : ['rclone', ['copy', p, REMOTE_OF(relN), '--exclude', '.DS_Store', '--tpslimit', '2', '--retries', '10', '-v']];
+      const out = startJob(dir === 'down' ? 'down' : 'up', { label: (dir === 'down' ? 'تنزيل ' : 'رفع ') + name, drive: true, cmd });
+      return send(res, out.error ? 409 : 200, out);
+    }
+    if (r === '/api/sync/file' && req.method === 'POST') {
+      const { rel, dir } = JSON.parse(await body(req));
+      const p = safePath(rel); const relN = path.relative(ROOT, p);
+      const cmd = dir === 'down' ? ['rclone', ['copyto', REMOTE_OF(relN), p, '-v']] : ['rclone', ['copyto', p, REMOTE_OF(relN), '--tpslimit', '2', '--retries', '10', '-v']];
+      const out = startJob(dir === 'down' ? 'down' : 'up', { label: (dir === 'down' ? 'تنزيل ' : 'رفع ') + path.basename(relN), drive: true, cmd });
+      return send(res, out.error ? 409 : 200, out);
+    }
+    if (r === '/api/autosync' && req.method === 'POST') {
+      const { on } = JSON.parse(await body(req));
+      if (on) fs.writeFileSync(AUTOSYNC, new Date().toISOString()); else fs.rmSync(AUTOSYNC, { force: true });
+      logAction({ type: 'autosync-set', on: !!on }); return send(res, 200, { on: !!on });
+    }
     if (r === '/api/health') return send(res, 200, checkHealth(u.searchParams.has('force')));
     if (r === '/api/job/cancel' && req.method === 'POST') return send(res, 200, { cancelled: cancelJob() });
     if (r === '/api/state') {

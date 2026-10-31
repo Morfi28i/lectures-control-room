@@ -6,15 +6,15 @@ const KEYS = [
   ['sl', 'سلايدز'], ['tr', 'ترجمة'], ['mm', 'خريطة ذهنية'], ['ar', 'سلايدز عربي'], ['pr', 'سلايدز للمقدم'], ['en', 'سلايدز English'],
 ];
 const KEY_NAME = Object.fromEntries(KEYS);
-const ACTION_NAME = { pull: 'سحب وترتيب', push: 'رفع على الدرايف', check: 'فحص unsorted', checkall: 'فحص كل المحاضرات' };
-const PAGES = { home: 'الرئيسية', subjects: 'المواد', books: 'الكتب', inbox: 'الوارد', activity: 'السجل', rules: 'الثوابت', settings: 'الإعدادات' };
+const ACTION_NAME = { pull: 'سحب وترتيب', push: 'رفع unsorted', check: 'فحص unsorted', checkall: 'فحص كل المحاضرات', runnow: 'تشغيل الخطوات', pushall: 'رفع كل الجديد', pullall: 'تنزيل من الدرايف', up: 'رفع', down: 'تنزيل' };
+const PAGES = { home: 'الرئيسية', subjects: 'المواد', books: 'الكتب', inbox: 'الوارد', sync: 'المزامنة', activity: 'السجل', rules: 'الثوابت', settings: 'الإعدادات' };
 const ar = new Intl.NumberFormat('ar-EG');
 const time = new Intl.DateTimeFormat('ar-EG', { hour: 'numeric', minute: '2-digit' });
 const dayTime = new Intl.DateTimeFormat('ar-EG', { weekday: 'long', hour: 'numeric', minute: '2-digit' });
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-let S = null, BOOKS = [], route = 'home', filter = 'all', query = '', current = null, rulesKey = 'thawabit', rulesDirty = false, streaming = false;
+let SY = null, syncList = 'local', retry = 5e3, histFilter = 'all', S = null, BOOKS = [], route = 'home', filter = 'all', query = '', current = null, rulesKey = 'thawabit', rulesDirty = false, streaming = false;
 
 async function api(url, opts = {}) {
   const r = await fetch(API + url, { headers: { 'content-type': 'application/json' }, ...opts });
@@ -22,9 +22,11 @@ async function api(url, opts = {}) {
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 }
-function toast(msg) {
-  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
-  clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 2800);
+function toast(msg, act, fn) {
+  const t = $('#toast'); $('#toastMsg').textContent = msg;
+  const b = $('#toastAct'); b.hidden = !act; b.textContent = act || ''; b.onclick = () => { t.classList.remove('show'); fn?.(); };
+  t.classList.add('show');
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), act ? 6000 : 2800);
 }
 // numbers roll up to their value, like a counter in an edit
 function countTo(el, to) {
@@ -61,14 +63,16 @@ addEventListener('hashchange', go);
 // ---------- state ----------
 async function load() {
   try {
-    [S, BOOKS] = await Promise.all([api('/api/state'), api('/api/books')]);
+    [S, BOOKS, SY] = await Promise.all([api('/api/state'), api('/api/books'), api('/api/sync')]);
   } catch {
+    clearTimeout(load.retryT); load.retryT = setTimeout(load, retry); retry = Math.min(retry * 2, 60e3);
     document.body.classList.add('offline'); document.body.classList.remove('loading');
     $('#sub').textContent = 'مش متوصّل بالماك'; $('#connDot').className = 'dot bad'; $('#connText').textContent = 'مش متوصّل';
     return;
   }
   document.body.classList.remove('offline', 'loading');
   $('#connDot').className = 'dot ok'; $('#connText').textContent = 'متوصّل بالماك';
+  load.at = Date.now(); retry = 5e3; notifyChanges();
   const lects = S.items.filter((i) => i.lecture && !i.inUnsorted);
   const done = lects.filter((i) => !i.missing.length).length;
   $('#sub').textContent = `${ar.format(lects.length)} محاضرة · ${ar.format(done)} كاملة · ${ar.format(S.pdfs)} ملف PDF`;
@@ -79,12 +83,13 @@ async function load() {
   $('#inboxBadge').hidden = !pend; $('#inboxBadge').textContent = ar.format(pend);
   if (S.job && !S.job.done && !streaming) attach(S.job.action);
   // only redraw when something changed, so bars and rings do not replay every refresh
-  const sig = JSON.stringify([S.items, S.pdfs, S.paused, S.runs, S.actions, S.queue, BOOKS]);
+  syncBadge();
+  const sig = JSON.stringify([S.items, S.pdfs, S.paused, S.runs, S.actions, S.queue, BOOKS, SY.at, SY.indexing, SY.counts, SY.auto]);
   if (sig !== load.sig) { load.sig = sig; renderPage(); }
 }
 function renderPage() {
   if (!S) return;
-  ({ home: renderHome, subjects: renderSubjects, books: renderBooks, inbox: renderInbox, activity: renderHistory, rules: () => {}, settings: renderSettings })[route]();
+  ({ home: renderHome, subjects: renderSubjects, books: renderBooks, inbox: renderInbox, sync: renderSync, activity: renderHistory, rules: () => {}, settings: renderSettings })[route]();
 }
 
 // ---------- home ----------
@@ -162,7 +167,7 @@ function renderSubjects() {
         <div class="clips">${items.map((i) => `
           <button class="clip ${!i.lecture ? 'ref' : i.missing.length ? 'miss' : ''}" data-id="${i.id}" style="--i:${ci++}">
             <span class="t">${esc(i.name)}</span><span class="tag">${i.lecture ? (i.lang === 'ar' ? 'عربي' : 'EN') : 'مراجع'}</span>
-            <span class="keys">${keysHTML(i)}</span>
+            <span class="keys">${keysHTML(i)}</span>${cloudBadge(i)}
           </button>`).join('')}</div></div>`;
     }).join('');
   const L = S.items.filter((i) => i.lecture && !i.inUnsorted);
@@ -188,14 +193,18 @@ function openDrawer(i) {
     return `<div class="${has ? '' : 'no'}"><i class="k ${has ? '' : need ? 'need' : 'off'}" style="--c:var(--${k})"></i>${n}${has ? '' : need ? ' · ناقص' : ''}</div>`;
   }).join('');
   const files = [...new Set([...i.sources.map((f) => f.name), ...Object.values(i.outputs).flat(), ...i.videos.map((f) => f.name)])];
-  $('#dFiles').innerHTML = files.map((n) => `<li><span>${esc(n)}</span><span>${/\.pdf$/i.test(n) ? `<button data-view="${esc(n)}">اعرض</button> ` : ''}<button data-open="${esc(n)}">افتح</button></span></li>`).join('');
+  const driveOnly = SY?.lists.drive.filter((r) => r.startsWith(i.rel + '/') && !r.slice(i.rel.length + 1).includes('/')).map((r) => r.split('/').pop()) || [];
+  $('#dFiles').innerHTML = [...files, ...driveOnly.filter((n) => !files.includes(n))].map((n) => { const st = SY?.status[i.rel + '/' + n]; return `<li><span>${statusChip(st)}${esc(n)}</span><span>${st === 'drive' ? `<button data-pull="${esc(n)}">نزّله</button>` : `${/\.pdf$/i.test(n) ? `<button data-view="${esc(n)}">اعرض</button> ` : ''}<button data-open="${esc(n)}">افتح</button>${st === 'local' || st === 'diff' ? ` <button data-push="${esc(n)}">ارفعه</button>` : ''}`}</span></li>`; }).join('');
+  const did = SY?.dirs[i.rel]; $('#dDrive').hidden = !did; if (did) $('#dDrive').href = `https://drive.google.com/drive/folders/${did}`;
   $('#dNote').value = i.missing.length ? 'كمّل: ' + i.missing.map((k) => KEY_NAME[k]).join('، ') : '';
   $('#drawer').showModal();
 }
 $('#dFiles').addEventListener('click', async (e) => {
   const v = e.target.dataset.view, o = e.target.dataset.open;
-  if (v) window.open(API + '/api/file?rel=' + encodeURIComponent(current.rel + '/' + v), '_blank');
+  if (v) preview(current.rel + '/' + v);
   if (o) { await api('/api/open', { method: 'POST', body: JSON.stringify({ rel: current.rel + '/' + o }) }); toast('اتفتح على الماك'); }
+  const up = e.target.dataset.push, dn = e.target.dataset.pull;
+  if (up || dn) { $('#drawer').close(); runSync('/api/sync/file', { rel: current.rel + '/' + (up || dn), dir: up ? 'up' : 'down' }, up ? 'up' : 'down'); }
 });
 $('#dReveal').addEventListener('click', async () => { await api('/api/open', { method: 'POST', body: JSON.stringify({ rel: current.rel }) }); toast('الفولدر اتفتح في Finder'); });
 $('#dQueue').addEventListener('click', async () => {
@@ -207,6 +216,8 @@ $('#drawer').addEventListener('click', (e) => { if (e.target === e.currentTarget
 // ---------- books ----------
 function renderBooks() {
   let i = 0, bi = 0;
+  const left = BOOKS.reduce((n, b) => n + b.need - b.done, 0);
+  $('.page[data-page="books"] .lead').innerHTML = `كل كتاب كبير متقسم أجزاء، كل جزء فيه فصلين تقريبًا، وليه سلايدز بلغة الكتاب وسلايدز عربي. ${left ? `<span class="eta">فاضل ${ar.format(left)} ملف، يعني حوالي ${ar.format(Math.max(1, Math.ceil(left / 25)))} ${Math.ceil(left / 25) > 1 ? 'أيام' : 'يوم'} شغل (الحسابات الأربعة بتعمل حوالي ٢٥ في اليوم).</span>` : '<span class="eta ok">كل الكتب خلصت ✓</span>'}`;
   $('#books').innerHTML = BOOKS.map((b) => {
     const pct = b.need ? b.done / b.need : 0;
     const parts = b.parts.map((p) => `
@@ -221,12 +232,19 @@ function renderBooks() {
         <div><h2>${esc(b.base)}</h2><small>${esc(b.subject)} · ${ar.format(b.parts.length)} ${b.parts.length > 1 ? 'أجزاء' : 'جزء'}</small></div>
       </div>
       <div class="strip">${parts}</div>
-      <div class="book-foot"><span>${ar.format(b.done)} من ${ar.format(b.need)} ملف جاهز</span><button class="btn ghost small" data-folder="${esc(b.folder)}">افتح الفولدر</button></div>
+      <div class="book-foot"><span>${ar.format(b.done)} من ${ar.format(b.need)} ملف جاهز</span><span class="book-btns">${b.done < b.need ? `<button class="btn ghost small" data-ask="${esc(b.key)}" data-tip="ضيف الأجزاء الناقصة لطلبات الطيار الآلي">اطلب الناقص</button>` : ''}<button class="btn ghost small" data-folder="${esc(b.folder)}">افتح الفولدر</button></span></div>
     </article>`;
   }).join('');
   requestAnimationFrame(() => requestAnimationFrame(() => $$('#books .arc').forEach((a) => ring(a, +a.dataset.f))));
 }
 $('#books').addEventListener('click', async (e) => {
+  const k = e.target.dataset.ask;
+  if (k) {
+    const b = BOOKS.find((x) => x.key === k);
+    const miss = b.parts.flatMap((p) => [!p.src && `الجزء ${p.part || 'كله'} ${b.lang === 'ar' ? 'عربي' : 'EN'}`, p.ar === false && `الجزء ${p.part || 'كله'} عربي`]).filter(Boolean);
+    await api('/api/queue', { method: 'POST', body: JSON.stringify({ rel: b.folder, note: `كتاب ${b.base}: اعمل ${miss.join('، ')} (حسب books-plan.tsv)` }) });
+    e.target.classList.add('done-pop'); e.target.textContent = 'اتطلب ✓'; e.target.disabled = true; toast('اتضاف للطلبات، الدورة الجاية هتشتغل عليه'); load(); return;
+  }
   const f = e.target.dataset.folder; if (!f) return;
   await api('/api/open', { method: 'POST', body: JSON.stringify({ rel: f }) }); toast('فولدر الكتاب اتفتح');
 });
@@ -246,7 +264,13 @@ function renderInbox() {
     ? S.queue.map((q) => `<li><div><b>${esc(q.rel.split('/').pop())}</b><small>${esc(q.note || 'كمّل الناقص')}</small></div><button class="x" data-del="${q.id}" aria-label="شيل الطلب">×</button></li>`).join('')
     : '<li class="muted">مفيش طلبات. افتح أي محاضرة من «المواد» واطلب تكملتها.</li>';
 }
-$('#queue').addEventListener('click', async (e) => { const id = e.target.dataset.del; if (!id) return; await api('/api/queue/' + id, { method: 'DELETE' }); toast('الطلب اتشال'); load(); });
+$('#queue').addEventListener('click', async (e) => {
+  const id = e.target.dataset.del; if (!id) return;
+  const q = S.queue.find((x) => x.id === id);
+  e.target.closest('li').classList.add('leaving');
+  await api('/api/queue/' + id, { method: 'DELETE' }); load();
+  toast('الطلب اتشال', 'رجّعه', async () => { await api('/api/queue', { method: 'POST', body: JSON.stringify({ rel: q.rel, note: q.note }) }); toast('رجع تاني'); load(); });
+});
 function upload(file) {
   const li = document.createElement('li');
   li.innerHTML = `<span>${esc(file.name)}</span><span class="bar-p"><i></i></span>`;
@@ -271,8 +295,9 @@ drop.addEventListener('drop', (e) => uploadAll([...e.dataTransfer.files]));
 function renderHistory() {
   drawHeat();
   const rows = [
-    ...S.runs.map((r) => ({ at: r.at, c: 'var(--pr)', t: 'دورة الطيار الآلي', d: r.summary })),
+    ...S.runs.map((r) => ({ k: 'run', at: r.at, c: 'var(--pr)', t: 'دورة الطيار الآلي', d: r.summary })),
     ...S.actions.map((a) => ({
+      k: a.type === 'job' ? 'job' : a.type === 'autopilot' ? 'run' : 'upload',
       at: a.at,
       c: a.type === 'job' ? (a.code === 0 ? 'var(--mm)' : 'var(--play)') : 'var(--muted)',
       t: a.type === 'job' ? `${ACTION_NAME[a.action] || a.action}${a.code === 0 ? '' : a.code === 'cancelled' ? ' (اتوقف)' : ' (فيه مشكلة)'}`
@@ -280,10 +305,10 @@ function renderHistory() {
         : a.type === 'autopilot' ? (a.paused ? 'الطيار الآلي وقف' : 'الطيار الآلي اشتغل') : a.type,
       d: a.file || a.rel || (a.tail || []).slice(-2).join(' / '),
     })),
-  ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 60);
+  ].filter((r) => histFilter === 'all' || r.k === histFilter).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 60);
   $('#history').innerHTML = rows.length
     ? rows.map((r, n) => `<li style="--c:${r.c};--i:${Math.min(n, 20)}"><div><b>${esc(r.t)}</b><small>${esc(r.d || '')}</small></div><time>${dayTime.format(new Date(r.at))}</time></li>`).join('')
-    : '<li class="muted">لسه مفيش حاجة اتعملت من اللوحة.</li>';
+    : `<li class="empty-state">${EMPTY}<span>مفيش حاجة هنا لسه.</span></li>`;
 }
 
 // ---------- commands + live console ----------
@@ -515,7 +540,7 @@ $('#palette').addEventListener('click', (e) => { if (e.target === e.currentTarge
 addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('#palette').open ? $('#palette').close() : palOpen(); }
   // 1..7 jump between pages when not typing
-  if (!e.metaKey && !e.ctrlKey && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) && /^[1-7]$/.test(e.key)) location.hash = '#/' + Object.keys(PAGES)[+e.key - 1];
+  if (!e.metaKey && !e.ctrlKey && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) && /^[1-8]$/.test(e.key)) location.hash = '#/' + Object.keys(PAGES)[+e.key - 1];
 });
 
 
@@ -573,3 +598,135 @@ addEventListener('pointermove', (e) => {
 function setBase(b) { document.documentElement.dataset.base = b; try { localStorage.setItem('base', b); } catch {} $$('.swatch').forEach((x) => x.setAttribute('aria-pressed', x.dataset.base === b)); }
 $$('.swatch').forEach((x) => x.addEventListener('click', () => { const go = () => setBase(x.dataset.base); document.startViewTransition && !reduced ? document.startViewTransition(go) : go(); }));
 setBase(document.documentElement.dataset.base || 'navy');
+
+
+// =====================================================================
+// TOUCHES
+// =====================================================================
+const EMPTY = '<svg viewBox="0 0 120 80" class="empty-art" aria-hidden="true"><rect x="14" y="20" width="92" height="50" rx="10"/><path d="M14 38h92"/><circle cx="60" cy="56" r="6"/><path d="M40 12h40" class="dash"/></svg>';
+
+// greeting by time of day + "updated X ago"
+function greet() {
+  const h = new Date().getHours();
+  $('#greet').textContent = h < 5 ? 'سهران يا Morfi؟' : h < 12 ? 'صباح الخير يا Morfi' : h < 17 ? 'يومك حلو يا Morfi' : 'مساء الخير يا Morfi';
+  if (load.at) { const s = Math.round((Date.now() - load.at) / 1000); $('#fresh').textContent = s < 10 ? '· اتحدّث دلوقتي' : `· اتحدّث من ${s < 60 ? ar.format(s) + ' ثانية' : ar.format(Math.round(s / 60)) + ' دقيقة'}`; }
+}
+greet(); setInterval(greet, 5000);
+async function refreshNow() { const b = $('#refresh'); b.classList.add('spinning'); await load(); setTimeout(() => b.classList.remove('spinning'), 500); toast('البيانات اتحدّثت'); }
+$('#refresh').addEventListener('click', refreshNow);
+
+// keyboard help
+$('#helpBtn').addEventListener('click', () => $('#help').showModal());
+addEventListener('keydown', (e) => {
+  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || e.metaKey || e.ctrlKey) return;
+  if (e.key === '?') $('#help').open ? $('#help').close() : $('#help').showModal();
+  if (e.key.toLowerCase() === 'r') refreshNow();
+});
+
+// in-app PDF preview
+function preview(rel) {
+  $('#vTitle').textContent = rel.split('/').pop();
+  $('#vFrame').src = API + '/api/file?rel=' + encodeURIComponent(rel);
+  $('#vOpen').onclick = async () => { await api('/api/open', { method: 'POST', body: JSON.stringify({ rel }) }); toast('اتفتح على الماك'); };
+  $('#viewer').showModal();
+}
+$('#vClose').addEventListener('click', () => $('#viewer').close());
+$('#viewer').addEventListener('close', () => { $('#vFrame').src = 'about:blank'; });
+
+// activity filters
+$$('#histFilters .chip').forEach((c) => c.addEventListener('click', () => { histFilter = c.dataset.h; $$('#histFilters .chip').forEach((x) => x.classList.toggle('on', x === c)); renderHistory(); }));
+
+// drop files anywhere → inbox upload
+let dragDepth = 0;
+addEventListener('dragenter', (e) => { if (!e.dataTransfer?.types?.includes('Files') || route === 'inbox') return; dragDepth++; $('#dropDest').textContent = 'هيتحطوا في الوارد: ' + ($('#dest').selectedOptions[0]?.textContent || 'مش عارف المادة'); $('#dropall').classList.add('on'); });
+addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('#dropall').classList.remove('on'); } });
+addEventListener('dragover', (e) => { if (route !== 'inbox') e.preventDefault(); });
+addEventListener('drop', (e) => {
+  if (route === 'inbox') return;
+  e.preventDefault(); dragDepth = 0; $('#dropall').classList.remove('on');
+  const files = [...(e.dataTransfer?.files || [])]; if (!files.length) return;
+  if (!$('#dest').options.length) renderInbox();
+  location.hash = '#/inbox'; setTimeout(() => uploadAll(files), 350);
+});
+
+// desktop notifications: job finished, new file waiting in unsorted
+const canNotify = () => 'Notification' in window && Notification.permission === 'granted';
+function notifyBtnState() { const b = $('#notifyBtn'); if (!('Notification' in window)) { b.textContent = 'مش مدعومة'; b.disabled = true; return; } b.textContent = Notification.permission === 'granted' ? 'شغّالة ✓' : Notification.permission === 'denied' ? 'مقفولة من المتصفح' : 'شغّل الإشعارات'; b.disabled = Notification.permission !== 'default'; }
+$('#notifyBtn').addEventListener('click', async () => { await Notification.requestPermission(); notifyBtnState(); if (canNotify()) new Notification('الإشعارات اشتغلت', { body: 'هقولك لما عملية تخلص أو ملف جديد يوصل.', icon: 'icon-192.png' }); });
+notifyBtnState();
+function notifyChanges() {
+  const pend = S.items.filter((i) => i.inUnsorted && i.missing.length).length;
+  if (notifyChanges.pend !== undefined && pend > notifyChanges.pend && canNotify()) new Notification('ملف جديد في الوارد', { body: `فيه ${pend} ملف مستني يتعمله ملفات.`, icon: 'icon-192.png' });
+  const last = S.actions.find((a) => a.type === 'job');
+  if (notifyChanges.job && last && last.at !== notifyChanges.job && document.hidden && canNotify()) new Notification(`${ACTION_NAME[last.action] || last.action}: ${last.code === 0 ? 'خلص' : 'فيه مشكلة'}`, { icon: 'icon-192.png' });
+  notifyChanges.pend = pend; notifyChanges.job = last?.at || notifyChanges.job || 'none';
+}
+
+// export a CSV of everything that is still missing (opens in Excel / Sheets)
+$('#exportBtn').addEventListener('click', () => {
+  const rows = [['النوع', 'المادة', 'الاسم', 'الناقص', 'المسار']];
+  for (const i of S.items) if (i.lecture && i.missing.length) rows.push(['محاضرة', i.subject, i.name, i.missing.map((k) => KEY_NAME[k]).join(' + '), i.rel]);
+  for (const b of BOOKS) for (const p of b.parts) { if (!p.src) rows.push(['كتاب', b.subject, `${b.base} - الجزء ${p.part || 'كله'}`, b.lang === 'ar' ? 'سلايدز عربي' : 'سلايدز EN', b.folder]); if (p.ar === false) rows.push(['كتاب', b.subject, `${b.base} - الجزء ${p.part || 'كله'}`, 'سلايدز عربي', b.folder]); }
+  const csv = '﻿' + rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `الناقص - ${new Date().toISOString().slice(0, 10)}.csv` });
+  a.click(); URL.revokeObjectURL(a.href); toast(`التقرير اتنزّل: ${ar.format(rows.length - 1)} حاجة ناقصة`);
+});
+
+// styled tooltips for anything with data-tip
+const tip = Object.assign(document.createElement('div'), { className: 'tip', role: 'tooltip' }); document.body.append(tip);
+document.addEventListener('pointerover', (e) => {
+  const el = e.target.closest?.('[data-tip]'); if (!el) return;
+  tip.textContent = el.dataset.tip; const r = el.getBoundingClientRect();
+  tip.style.left = `${Math.min(innerWidth - 12, Math.max(12, r.left + r.width / 2))}px`; tip.style.top = `${r.bottom + 10}px`; tip.classList.add('on');
+});
+document.addEventListener('pointerout', (e) => { if (e.target.closest?.('[data-tip]')) tip.classList.remove('on'); });
+
+
+// =====================================================================
+// LOCAL + DRIVE
+// =====================================================================
+const ST = { both: ['على الاتنين', 'var(--acc-b)'], local: ['على الماك بس', 'var(--sl)'], drive: ['على الدرايف بس', 'var(--acc-a)'], diff: ['الحجم مختلف', 'var(--play)'] };
+function statusChip(st) { return st ? `<i class="sdot" style="--c:${ST[st][1]}" data-tip="${ST[st][0]}"></i>` : ''; }
+function folderState(rel) {
+  if (!SY?.ready) return null;
+  let local = 0, drive = 0, both = 0;
+  for (const [r, st] of Object.entries(SY.status)) if (r.startsWith(rel + '/') && !r.slice(rel.length + 1).includes('/')) { if (st === 'both') both++; else if (st === 'drive') drive++; else local++; }
+  return { local, drive, both };
+}
+function cloudBadge(i) {
+  const f = folderState(i.rel); if (!f) return '';
+  const ok = !f.local && !f.drive, tipT = ok ? 'متطابق مع الدرايف' : `${f.local ? f.local + ' على الماك بس' : ''}${f.local && f.drive ? ' · ' : ''}${f.drive ? f.drive + ' على الدرايف بس' : ''}`;
+  return `<span class="cloud ${ok ? 'ok' : 'warn'}" data-tip="${tipT}"><svg viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.6-8A6 6 0 0 1 18 9a4.5 4.5 0 0 1-1 9z"/>${ok ? '<path d="m9 13 2 2 4-4"/>' : '<path d="M12 10v4M12 16.5v.5"/>'}</svg></span>`;
+}
+function syncBadge() { const n = SY?.ready ? SY.counts.local + SY.counts.drive + SY.counts.diff : 0; $('#syncBadge').hidden = !n; $('#syncBadge').textContent = ar.format(n); }
+async function runSync(url, body, action) {
+  try { await api(url, { method: 'POST', body: JSON.stringify(body) }); location.hash = '#/home'; attach(action); } catch (e) { toast(e.message); }
+}
+function renderSync() {
+  if (!SY) return;
+  if (SY.indexing && !renderSync.poll) renderSync.poll = setInterval(async () => { SY = await api('/api/sync'); syncBadge(); if (route === 'sync') renderSync(); if (!SY.indexing) { clearInterval(renderSync.poll); renderSync.poll = null; } }, 4000);
+  const total = SY.counts.both + SY.counts.local + SY.counts.drive + SY.counts.diff, pct = total ? SY.counts.both / total : 0;
+  $('#syncArc').style.strokeDashoffset = String(326.7 * (1 - pct));
+  $('#syncPct').textContent = SY.ready ? `${ar.format(Math.round(pct * 100))}٪` : '…';
+  $('#syncWhen').textContent = SY.indexing ? 'بيقرا الدرايف دلوقتي…' : SY.ready ? `آخر قراءة للدرايف ${dayTime.format(new Date(SY.at))} · ${ar.format(total)} ملف` : (SY.error || 'لسه بيقرا…');
+  countTo($('#cBoth'), SY.counts.both); countTo($('#cLocal'), SY.counts.local); countTo($('#cDrive'), SY.counts.drive); countTo($('#cDiff'), SY.counts.diff);
+  $('.sync-flow').classList.toggle('busy', !!(S.job && !S.job.done && /push|pull|up|down/.test(S.job.action)));
+  $('#autosync').checked = SY.auto;
+  const q = $('#syncQ').value.trim().toLowerCase();
+  const rows = (SY.lists[syncList] || []).filter((r) => !q || r.toLowerCase().includes(q));
+  $('#syncList').innerHTML = rows.length ? rows.slice(0, 200).map((r, n) => {
+    const name = r.split('/').pop(), dir = r.split('/').slice(0, -1).join(' / '), id = SY.ids[r];
+    return `<li style="--i:${Math.min(n, 25)}"><div>${statusChip(syncList)}<b>${esc(name)}</b><small>${esc(dir)}</small></div><span class="row-actions">${syncList === 'drive' ? `<button class="btn ghost small" data-sdown="${esc(r)}">نزّله</button>` : `<button class="btn ghost small" data-sup="${esc(r)}">ارفعه</button>`}${id ? `<a class="btn ghost small" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${id}/view">Drive</a>` : ''}</span></li>`;
+  }).join('') : `<li class="empty-state">${EMPTY}<span>${syncList === 'local' ? 'كل اللي على الماك موجود على الدرايف ✓' : syncList === 'drive' ? 'مفيش حاجة على الدرايف ناقصة من الماك ✓' : 'مفيش ملفات حجمها مختلف ✓'}</span></li>`;
+}
+$('#syncTabs').addEventListener('click', (e) => { const c = e.target.closest('[data-l]'); if (!c) return; syncList = c.dataset.l; $$('#syncTabs .chip').forEach((x) => x.classList.toggle('on', x === c)); renderSync(); });
+$$('.stat[data-list]').forEach((b) => b.addEventListener('click', () => { if (b.dataset.list === 'both') return; $(`#syncTabs [data-l="${b.dataset.list}"]`).click(); $('#syncList').scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+$('#syncQ').addEventListener('input', renderSync);
+$('#syncList').addEventListener('click', (e) => {
+  const up = e.target.dataset.sup, dn = e.target.dataset.sdown; if (!up && !dn) return;
+  runSync('/api/sync/file', { rel: up || dn, dir: up ? 'up' : 'down' }, up ? 'up' : 'down');
+});
+$('#rescan').addEventListener('click', async () => { SY = await api('/api/sync?rescan'); toast('بيقرا الدرايف من الأول…'); renderSync(); const t = setInterval(async () => { SY = await api('/api/sync'); renderSync(); syncBadge(); if (!SY.indexing) { clearInterval(t); toast('الدرايف اتقرا ✓'); } }, 4000); });
+$('#autosync').addEventListener('change', async (e) => { await api('/api/autosync', { method: 'POST', body: JSON.stringify({ on: e.target.checked }) }); toast(e.target.checked ? 'المزامنة التلقائية اشتغلت: أي ملف جديد على الماك هيترفع لوحده' : 'المزامنة التلقائية وقفت'); load(); });
+$('#dUp').addEventListener('click', () => { $('#drawer').close(); runSync('/api/sync/folder', { rel: current.rel, dir: 'up' }, 'up'); });
+$('#dDown').addEventListener('click', () => { $('#drawer').close(); runSync('/api/sync/folder', { rel: current.rel, dir: 'down' }, 'down'); });

@@ -38,6 +38,7 @@
       <li><a href="#/subjects" data-route="subjects"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h13"/></svg><span>المواد</span></a></li>
       <li><a href="#/books" data-route="books"><svg viewBox="0 0 24 24"><path d="M5 4h10a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM5 17a3 3 0 0 1 3-3h10"/></svg><span>الكتب</span></a></li>
       <li><a href="#/inbox" data-route="inbox"><svg viewBox="0 0 24 24"><path d="M4 13h4l2 3h4l2-3h4M5 5h14l1 8v6H4v-6z"/></svg><span>الوارد</span><i class="badge" id="inboxBadge" hidden></i></a></li>
+      <li><a href="#/sync" data-route="sync"><svg viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.6-8A6 6 0 0 1 18 9a4.5 4.5 0 0 1-1 9z"/><path d="m10 13 2-2 2 2M12 11v5"/></svg><span>المزامنة</span><i class="badge" id="syncBadge" hidden></i></a></li>
       <li><a href="#/activity" data-route="activity"><svg viewBox="0 0 24 24"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9z"/></svg><span>السجل</span></a></li>
       <li><a href="#/rules" data-route="rules"><svg viewBox="0 0 24 24"><path d="M7 4h10v16H7zM10 8h4M10 12h4M10 16h2"/></svg><span>الثوابت</span></a></li>
       <li><a href="#/settings" data-route="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><span>الإعدادات</span></a></li>
@@ -51,12 +52,15 @@
   <div class="main">
     <header class="top">
       <div>
+        <p class="greet" id="greet"></p>
         <h1 id="pageTitle">الرئيسية</h1>
-        <p class="sub" id="sub">بيقرا الفولدرات…</p>
+        <p class="sub"><span id="sub">بيقرا الفولدرات…</span> <span class="fresh" id="fresh"></span></p>
       </div>
       <div class="top-actions">
+        <button class="iconbtn" id="refresh" data-tip="حدّث دلوقتي" aria-label="حدّث دلوقتي"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg></button>
+        <button class="iconbtn" id="helpBtn" data-tip="اختصارات الكيبورد" aria-label="اختصارات الكيبورد"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h1M11 10h1M15 10h2M7 14h10"/></svg></button>
         <a class="jobpill" id="jobPill" href="#/home" hidden><span class="spin"></span><span id="jobPillText"></span></a>
-        <label class="pilot" title="لما تقفله، الدورات الأوتوماتيك هتعدّي من غير ما تعمل حاجة">
+        <label class="pilot" data-tip="لما تقفله، الدورات الأوتوماتيك هتعدّي من غير ما تعمل حاجة">
           <input type="checkbox" id="pilot" role="switch">
           <span class="knob" aria-hidden="true"></span>
           <span id="pilotText">الطيار الآلي</span>
@@ -184,6 +188,44 @@
         </div>
       </section>
 
+      <!-- ============ SYNC ============ -->
+      <section class="page" data-page="sync" hidden>
+        <div class="sync-hero card glow-border">
+          <div class="sync-ring">
+            <svg viewBox="0 0 120 120"><circle r="52" cx="60" cy="60"/><circle class="arc" r="52" cx="60" cy="60" id="syncArc"/></svg>
+            <div><b id="syncPct">٠٪</b><span>متطابق</span></div>
+          </div>
+          <div class="sync-side">
+            <h2>الماك والدرايف</h2>
+            <p class="muted" id="syncWhen">بيقرا الدرايف…</p>
+            <div class="sync-flow" aria-hidden="true"><span class="node mac">الماك</span><span class="pipe"><i></i><i></i><i></i></span><span class="node cloud">الدرايف</span></div>
+            <div class="row-actions">
+              <button class="btn small" data-run="pushall">ارفع كل الجديد</button>
+              <button class="btn ghost small" data-run="pullall">نزّل الجديد</button>
+              <button class="btn ghost small" id="rescan">اقرا الدرايف تاني</button>
+            </div>
+            <label class="pilot small-switch"><input type="checkbox" id="autosync" role="switch"><span class="knob" aria-hidden="true"></span><span>مزامنة تلقائية كل ١٠ دقايق</span></label>
+          </div>
+        </div>
+        <div class="stats4">
+          <button class="stat card" data-list="both"><b id="cBoth">٠</b><span>على الاتنين</span></button>
+          <button class="stat card" data-list="local"><b id="cLocal">٠</b><span>على الماك بس</span></button>
+          <button class="stat card" data-list="drive"><b id="cDrive">٠</b><span>على الدرايف بس</span></button>
+          <button class="stat card" data-list="diff"><b id="cDiff">٠</b><span>الحجم مختلف</span></button>
+        </div>
+        <div class="card">
+          <div class="row-head">
+            <div class="filters" id="syncTabs" role="tablist">
+              <button class="chip on" data-l="local">على الماك بس</button>
+              <button class="chip" data-l="drive">على الدرايف بس</button>
+              <button class="chip" data-l="diff">الحجم مختلف</button>
+            </div>
+            <input type="search" id="syncQ" placeholder="دوّر على ملف…" aria-label="بحث في الملفات">
+          </div>
+          <ul class="list synclist" id="syncList"></ul>
+        </div>
+      </section>
+
       <!-- ============ ACTIVITY ============ -->
       <section class="page" data-page="activity" hidden>
         <div class="card">
@@ -191,7 +233,18 @@
           <p class="muted">كل مربع يوم، وكل ما لونه يغمق كان فيه شغل أكتر. آخر ١٢ أسبوع.</p>
           <div class="heat" id="heat"></div>
         </div>
-        <div class="card"><ol class="timeline" id="history"></ol></div>
+        <div class="card">
+          <div class="row-head">
+            <h2>كل اللي حصل</h2>
+            <div class="filters" id="histFilters" role="group" aria-label="فلتر السجل">
+              <button class="chip on" data-h="all">الكل</button>
+              <button class="chip" data-h="job">الأوامر</button>
+              <button class="chip" data-h="run">الطيار الآلي</button>
+              <button class="chip" data-h="upload">الملفات والطلبات</button>
+            </div>
+          </div>
+          <ol class="timeline" id="history"></ol>
+        </div>
       </section>
 
       <!-- ============ RULES ============ -->
@@ -217,8 +270,16 @@
             <p class="muted">بيشتغل ٣ مرات في اليوم: ٩ الصبح، و٣ العصر، و٩ بالليل. بيسحب الجديد، يعمل كل الملفات، يكمّل أجزاء الكتب، ويرفع.</p>
             <div class="setting"><span>الحالة</span><b id="sPilot">…</b></div>
             <div class="setting"><span>الدورة الجاية</span><b id="sNext">…</b></div>
-            <div class="setting"><span>شغّله دلوقتي</span><button class="btn small" id="openClaude">افتح Claude</button></div>
-            <p class="muted small">التشغيل الفوري بيتعمل من Claude: Scheduled ← lectures-unsorted-autopilot ← Run now.</p>
+            <div class="setting"><span>شغّل الخطوات دلوقتي</span><button class="btn small" data-run="runnow" data-tip="يسحب الجديد من الدرايف، يرتّبه، ويرفع أي حاجة ناقصة">شغّل دلوقتي</button></div>
+            <div class="setting gem"><span>اعمل الملفات في Gemini</span>
+              <div class="gem-accts">
+                <a class="gem-btn" href="https://notebook.google.com/?authuser=0" target="_blank" rel="noopener" data-tip="sdyqs0437 (صاحب الدرايف)"><span class="gem-star"></span>١</a>
+                <a class="gem-btn" href="https://notebook.google.com/?authuser=1" target="_blank" rel="noopener" data-tip="capital.science.faculty"><span class="gem-star"></span>٢</a>
+                <a class="gem-btn" href="https://notebook.google.com/?authuser=2" target="_blank" rel="noopener" data-tip="essamsidek123"><span class="gem-star"></span>٣</a>
+                <a class="gem-btn" href="https://notebook.google.com/?authuser=3" target="_blank" rel="noopener" data-tip="ahmadsidek220"><span class="gem-star"></span>٤</a>
+              </div>
+            </div>
+            <p class="muted small">الترجمة والخرايط والسلايدز بتتعمل في Gemini Notebook، والطيار الآلي بيعملها لوحده ٣ مرات في اليوم. عايز دورة كاملة دلوقتي؟ <button class="linkbtn" id="openClaude">افتح Claude</button> ← Scheduled ← Run now.</p>
           </div>
           <div class="card">
             <h2>الاتصال بالدرايف</h2>
@@ -244,6 +305,8 @@
                 <button class="swatch" data-base="plum" title="بنفسجي" style="--sw-a:#17123a;--sw-b:#2e2563"></button>
               </div>
             </div>
+            <div class="setting"><span>إشعارات على الماك</span><button class="btn ghost small" id="notifyBtn">شغّل الإشعارات</button></div>
+            <div class="setting"><span>تقرير بالناقص</span><button class="btn ghost small" id="exportBtn">نزّل ملف Excel (CSV)</button></div>
             <div class="setting"><span>فولدر المحاضرات</span><button class="btn ghost small" id="openRoot">افتحه</button></div>
           </div>
           <div class="card about">
@@ -274,10 +337,35 @@
     <textarea id="dNote" rows="2" placeholder="مثلاً: اعمل السلايدز العربي، أو اعمل presenter عشان دي آخر محاضرة"></textarea>
     <button class="btn" id="dQueue">ضيفها للطلبات</button>
   </div>
-  <div class="d-actions"><button class="btn ghost" id="dReveal">افتح الفولدر</button></div>
+  <div class="d-actions">
+    <button class="btn ghost" id="dReveal">افتح الفولدر</button>
+    <button class="btn ghost" id="dUp">ارفع الفولدر على الدرايف</button>
+    <button class="btn ghost" id="dDown">نزّل الناقص من الدرايف</button>
+    <a class="btn ghost" id="dDrive" target="_blank" rel="noopener">افتحه في Drive</a>
+  </div>
 </dialog>
 
-<div class="toast" id="toast" role="status"></div>
+<div class="toast" id="toast" role="status"><span id="toastMsg"></span><button id="toastAct" hidden></button></div>
+
+<dialog class="viewer" id="viewer" aria-labelledby="vTitle">
+  <div class="viewer-head"><b id="vTitle"></b><span><button class="btn ghost small" id="vOpen">افتح على الماك</button><button class="btn small" id="vClose">اقفل</button></span></div>
+  <iframe id="vFrame" title="معاينة الملف"></iframe>
+</dialog>
+
+<dialog class="help" id="help" aria-labelledby="helpTitle">
+  <h2 id="helpTitle">اختصارات الكيبورد</h2>
+  <dl>
+    <div><dt><kbd>⌘</kbd><kbd>K</kbd></dt><dd>بحث وأوامر</dd></div>
+    <div><dt><kbd>1</kbd>…<kbd>7</kbd></dt><dd>تنقّل بين الصفحات</dd></div>
+    <div><dt><kbd>R</kbd></dt><dd>حدّث البيانات</dd></div>
+    <div><dt><kbd>?</kbd></dt><dd>الشاشة دي</dd></div>
+    <div><dt><kbd>Esc</kbd></dt><dd>اقفل أي نافذة</dd></div>
+  </dl>
+  <p class="muted small">وتقدر ترمي أي ملف على أي صفحة وهيتحط في الوارد.</p>
+  <form method="dialog"><button class="btn">تمام</button></form>
+</dialog>
+
+<div class="dropall" id="dropall" aria-hidden="true"><div><svg viewBox="0 0 24 24"><path d="M12 15V3m0 0-5 5m5-5 5 5M4 15v4h16v-4"/></svg><b>سيب الملفات هنا</b><span id="dropDest"></span></div></div>
 <script src="app.js" type="module"></script>
 </body>
 </html>
