@@ -27,9 +27,9 @@ fs.mkdirSync(LOGS, { recursive: true });
 // ---------- scanning ----------
 const OUT = [
   ['pr', /\(سلايدز للمقدم\) - English\.pdf$/],
-  ['ar', /\(سلايدز\) - عربي\.pdf$/],
+  ['ar', /\(سلايدز\) - عربي( - الجزء .*)?\.pdf$/],
   ['en', /\(سلايدز\) - English\.pdf$/],
-  ['sl', /\(سلايدز\)\.pdf$|( - ملخص| - أهم النقاط)\.pdf$/],
+  ['sl', /\(سلايدز\)( - الجزء .*)?\.pdf$|( - ملخص| - أهم النقاط)\.pdf$/],
   ['tr', / - ترجمة\.pdf$/],
   ['mm', / - خريطة ذهنية\.pdf$/],
 ];
@@ -112,17 +112,64 @@ function startJob(action) {
   job = { id: randomUUID(), action, label: a.label, lines: [], done: false, code: null, started: Date.now(), clients: new Set() };
   const j = job;
   const push = (line) => { j.lines.push(line); for (const c of j.clients) c.write(`data: ${JSON.stringify({ line })}\n\n`); };
-  const p = spawn(a.cmd[0], a.cmd[1], { env: ENV });
-  const feed = (buf) => buf.toString().split('\n').map((l) => l.replace(/^\d{4}\/\d\d\/\d\d \d\d:\d\d:\d\d (NOTICE|INFO|ERROR) ?:? ?/, '')).filter((l) => l.trim()).forEach(push);
+  const p = spawn(a.cmd[0], a.cmd[1], { env: ENV, detached: true });
+  j.proc = p;
+  const feed = (buf) => buf.toString().split('\n').map((l) => l.replace(/^\d{4}\/\d\d\/\d\d \d\d:\d\d:\d\d (NOTICE|INFO|ERROR) ?:? ?/, '')).filter((l) => l.trim() && !/client_id/.test(l)).forEach(push);
   p.stdout.on('data', feed); p.stderr.on('data', feed);
   p.on('error', (e) => push('خطأ: ' + e.message));
   p.on('close', (code) => {
-    j.done = true; j.code = code;
-    logAction({ type: 'job', action, label: a.label, code, secs: Math.round((Date.now() - j.started) / 1000), tail: j.lines.slice(-6) });
-    for (const c of j.clients) { c.write(`event: end\ndata: ${JSON.stringify({ code })}\n\n`); c.end(); }
+    j.done = true; j.code = j.cancelled ? 'cancelled' : code;
+    logAction({ type: 'job', action, label: a.label, code: j.code, secs: Math.round((Date.now() - j.started) / 1000), tail: j.lines.slice(-6) });
+    for (const c of j.clients) { c.write(`event: end\ndata: ${JSON.stringify({ code: j.code })}\n\n`); c.end(); }
   });
   return { id: j.id };
 }
+function cancelJob() {
+  if (!job || job.done) return false;
+  job.cancelled = true;
+  try { process.kill(-job.proc.pid, 'SIGTERM'); } catch { try { job.proc.kill('SIGTERM'); } catch {} }
+  return true;
+}
+
+// ---------- books: split slide parts (plan in books-plan.tsv) ----------
+function books() {
+  const rows = fs.readFileSync(path.join(KIT, 'books-plan.tsv'), 'utf8').trim().split('\n').slice(1).map((l) => l.split('\t'));
+  const map = new Map();
+  for (const [key, folder, source, base, lang, part, label, cover] of rows) {
+    if (!map.has(key)) map.set(key, { key, folder, source, base, lang, parts: [] });
+    const dir = path.join(ROOT, folder);
+    const name = (ar) => `${base} - ملخص وأهم النقاط (سلايدز)${ar ? ' - عربي' : ''}${part !== '0' ? ` - الجزء ${part} (${label})` : ''}.pdf`;
+    const has = (n) => fs.existsSync(path.join(dir, n));
+    map.get(key).parts.push({ part: Number(part), label, cover, src: has(name(false)), ar: lang === 'en' ? has(name(true)) : null });
+  }
+  return [...map.values()].map((b) => {
+    const need = b.parts.reduce((n, p) => n + 1 + (p.ar === null ? 0 : 1), 0);
+    const done = b.parts.reduce((n, p) => n + (p.src ? 1 : 0) + (p.ar ? 1 : 0), 0);
+    return { ...b, subject: b.folder.split('/')[0].trim(), need, done };
+  });
+}
+
+// ---------- health: is Drive reachable through rclone? (cached 10 min) ----------
+let health = { at: 0 };
+function checkHealth(force) {
+  if (!force && Date.now() - health.at < 600e3) return health;
+  health = { ...health, at: Date.now(), checking: true };
+  const p = spawn('rclone', ['about', 'gdfull:', '--json'], { env: ENV });
+  let out = '', err = '';
+  const t = setTimeout(() => p.kill('SIGTERM'), 25e3);
+  p.stdout.on('data', (d) => (out += d)); p.stderr.on('data', (d) => (err += d));
+  p.on('close', (code) => {
+    clearTimeout(t);
+    let about = null; try { about = JSON.parse(out); } catch {}
+    health = {
+      at: Date.now(), checking: false, drive: code === 0 && !!about,
+      usedGB: about ? +(about.used / 2 ** 30).toFixed(1) : null, freeGB: about ? Math.round(about.free / 2 ** 30) : null,
+      sharedKey: /shared Google Drive client_id/.test(err), rateLimited: /rateLimitExceeded/.test(err),
+    };
+  });
+  return health;
+}
+checkHealth(true);
 
 // ---------- helpers ----------
 function safePath(rel) {
@@ -138,7 +185,7 @@ function body(req, limit = 2e6) {
   });
 }
 const send = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); };
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 
 function nextRun(now = new Date()) {
   for (const h of SCHEDULE) { const d = new Date(now); d.setHours(h, 0, 0, 0); if (d > now) return d; }
@@ -169,11 +216,15 @@ http.createServer(async (req, res) => {
     const u = new URL(req.url, `http://${req.headers.host}`);
     const r = u.pathname;
 
-    if (req.method === 'GET' && (r === '/' || r === '/index.html' || r === '/app.js' || r === '/style.css')) {
+    if (req.method === 'GET' && (r === '/' || /^\/[a-z0-9-]+\.(html|js|css|svg|png|webmanifest)$/.test(r))) {
       const f = path.join(KIT, 'dashboard', 'docs', r === '/' ? 'index.html' : r.slice(1));
-      res.writeHead(200, { 'content-type': MIME[path.extname(f)], 'cache-control': 'no-store' });
+      if (!fs.existsSync(f)) return send(res, 404, { error: 'not found' });
+      res.writeHead(200, { 'content-type': MIME[path.extname(f)], 'cache-control': 'no-cache' });
       return fs.createReadStream(f).pipe(res);
     }
+    if (r === '/api/books') return send(res, 200, books());
+    if (r === '/api/health') return send(res, 200, checkHealth(u.searchParams.has('force')));
+    if (r === '/api/job/cancel' && req.method === 'POST') return send(res, 200, { cancelled: cancelJob() });
     if (r === '/api/state') {
       const s = scan();
       return send(res, 200, {

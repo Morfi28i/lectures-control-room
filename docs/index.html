@@ -2,154 +2,215 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1d1a2c">
 <title>غرفة تحكم المحاضرات</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="bar">
-  <div class="brand">
-    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="9" width="26" height="4" rx="2"/><rect x="3" y="15" width="18" height="4" rx="2"/><rect x="3" y="21" width="22" height="4" rx="2"/><path d="M12 3h8l-4 5z"/><rect x="15" y="7" width="2" height="22"/></svg>
-    <div>
-      <h1>غرفة تحكم المحاضرات</h1>
-      <p class="sub" id="sub">بيقرا الفولدرات…</p>
+<div class="app">
+  <!-- sidebar on desktop, bottom tab bar on phones -->
+  <nav class="side" aria-label="الأقسام">
+    <a class="brand" href="#/home" aria-label="الرئيسية">
+      <img src="icon.svg" alt="" width="40" height="40">
+      <span><b>المحاضرات</b><small>غرفة التحكم</small></span>
+    </a>
+    <ul class="nav">
+      <li><a href="#/home" data-route="home"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9h-6v-6H9v6H3z"/></svg><span>الرئيسية</span></a></li>
+      <li><a href="#/subjects" data-route="subjects"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h13"/></svg><span>المواد</span></a></li>
+      <li><a href="#/books" data-route="books"><svg viewBox="0 0 24 24"><path d="M5 4h10a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM5 17a3 3 0 0 1 3-3h10"/></svg><span>الكتب</span></a></li>
+      <li><a href="#/inbox" data-route="inbox"><svg viewBox="0 0 24 24"><path d="M4 13h4l2 3h4l2-3h4M5 5h14l1 8v6H4v-6z"/></svg><span>الوارد</span><i class="badge" id="inboxBadge" hidden></i></a></li>
+      <li><a href="#/activity" data-route="activity"><svg viewBox="0 0 24 24"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9z"/></svg><span>السجل</span></a></li>
+      <li><a href="#/rules" data-route="rules"><svg viewBox="0 0 24 24"><path d="M7 4h10v16H7zM10 8h4M10 12h4M10 16h2"/></svg><span>الثوابت</span></a></li>
+      <li><a href="#/settings" data-route="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><span>الإعدادات</span></a></li>
+    </ul>
+    <div class="side-foot">
+      <span class="dot" id="connDot"></span><span id="connText">بيتوصل…</span>
     </div>
-  </div>
-  <label class="pilot" title="لما تقفله، الدورات الأوتوماتيك هتعدّي من غير ما تعمل حاجة">
-    <input type="checkbox" id="pilot" role="switch">
-    <span class="knob" aria-hidden="true"></span>
-    <span id="pilotText">الطيار الآلي</span>
-  </label>
-</header>
+  </nav>
 
-<main>
-  <section class="offline-note" role="alert">
-    <h2>اللوحة مش لاقية الماك</h2>
-    <p>التحكم بيشتغل من الماك بتاعك بس. شغّل السيرفر على الماك وافتح الصفحة دي من نفس الجهاز، وهي هتتوصل لوحدها.</p>
-    <p class="muted">من موبايل أو جهاز تاني هتشوف الشكل بس من غير بيانات، عشان ملفاتك متطلعش برا جهازك.</p>
-  </section>
-  <!-- the day as an edit timeline: 3 autopilot runs + a live playhead -->
-  <section class="day" aria-labelledby="dayTitle">
-    <div class="day-head">
+  <div class="main">
+    <header class="top">
       <div>
-        <h2 id="dayTitle">الدورة الجاية</h2>
-        <p class="count" id="countdown" aria-live="off">--:--:--</p>
-        <p class="muted" id="nextLabel"></p>
+        <h1 id="pageTitle">الرئيسية</h1>
+        <p class="sub" id="sub">بيقرا الفولدرات…</p>
       </div>
-      <div class="last" id="lastRun"></div>
-    </div>
-    <div class="ruler" id="ruler" aria-hidden="true">
-      <div class="ticks" id="ticks"></div>
-      <div class="playhead" id="playhead"><span id="nowLabel"></span></div>
-    </div>
-  </section>
-
-  <section class="deck" aria-label="التحكم">
-    <button class="cmd" data-run="pull">
-      <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
-      <b>هات الجديد ورتّبه</b><small>بيسحب من الدرايف ويعمل لكل ملف فولدره</small>
-    </button>
-    <button class="cmd" data-run="push">
-      <svg viewBox="0 0 24 24"><path d="M12 19V7m0 0-5 5m5-5 5 5M4 4h16"/></svg>
-      <b>ارفع على الدرايف</b><small>بيضيف الجديد بس، مبيمسحش حاجة</small>
-    </button>
-    <button class="cmd" data-run="check">
-      <svg viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></svg>
-      <b>اتأكد من unsorted</b><small>يقارن الجهاز بالدرايف</small>
-    </button>
-    <button class="cmd" data-run="checkall">
-      <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10m3 0 2 2 3-4"/></svg>
-      <b>اتأكد من كل المحاضرات</b><small>فحص كامل لكل الفولدرات</small>
-    </button>
-    <button class="cmd alt" id="openRoot">
-      <svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"/></svg>
-      <b>افتح الفولدر</b><small>محاضرات على الماك</small>
-    </button>
-    <button class="cmd alt" id="openClaude">
-      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-      <b>شغّل الدورة كاملة</b><small>بيفتح Claude، اضغط Run now على المهمة</small>
-    </button>
-  </section>
-
-  <section class="console" aria-labelledby="consoleTitle">
-    <div class="console-head">
-      <h2 id="consoleTitle">الشاشة</h2>
-      <span class="state" id="jobState">مستني أمر</span>
-    </div>
-    <pre id="log" aria-live="polite"></pre>
-  </section>
-
-  <section class="drop" id="drop" aria-labelledby="dropTitle">
-    <h2 id="dropTitle">ضيف محاضرة جديدة</h2>
-    <p class="muted">ارمي الملفات هنا أو اختارها. هتتحط جوه unsorted في المادة اللي تختارها، وبعدين دوس «ارفع على الدرايف» والطيار الآلي يكمّل الباقي.</p>
-    <div class="drop-row">
-      <label>المادة/القسم
-        <select id="dest"></select>
-      </label>
-      <label class="pick">اختار ملفات<input type="file" id="files" multiple accept=".pdf,.pptx,.ppt,.docx,.doc"></label>
-    </div>
-    <ul id="uploads"></ul>
-  </section>
-
-  <section class="tracks" aria-labelledby="tracksTitle">
-    <div class="tracks-head">
-      <h2 id="tracksTitle">كل المحاضرات</h2>
-      <div class="filters" role="group" aria-label="فلتر">
-        <button class="chip on" data-f="all">الكل</button>
-        <button class="chip" data-f="miss">ناقصها حاجة</button>
-        <button class="chip" data-f="done">كاملة</button>
-        <button class="chip" data-f="unsorted">في unsorted</button>
-        <input type="search" id="q" placeholder="دوّر على محاضرة…" aria-label="بحث">
+      <div class="top-actions">
+        <a class="jobpill" id="jobPill" href="#/home" hidden><span class="spin"></span><span id="jobPillText"></span></a>
+        <label class="pilot" title="لما تقفله، الدورات الأوتوماتيك هتعدّي من غير ما تعمل حاجة">
+          <input type="checkbox" id="pilot" role="switch">
+          <span class="knob" aria-hidden="true"></span>
+          <span id="pilotText">الطيار الآلي</span>
+        </label>
       </div>
-    </div>
-    <ul class="legend" id="legend"></ul>
-    <div id="trackList"></div>
-  </section>
+    </header>
 
-  <div class="split">
-    <section class="cover" aria-labelledby="coverTitle">
-      <h2 id="coverTitle">نسبة التجهيز</h2>
-      <div id="meters"></div>
+    <section class="offline-note card" role="alert">
+      <h2>اللوحة مش لاقية الماك</h2>
+      <p>التحكم بيشتغل من الماك بتاعك بس. افتح التطبيق من الماك والسيرفر شغال، وهو هيتوصل لوحده.</p>
     </section>
-    <section class="queue" aria-labelledby="queueTitle">
-      <h2 id="queueTitle">طلبات للطيار الآلي</h2>
-      <p class="muted">أي محاضرة تطلب تكملتها بتستنى هنا، والدورة الجاية بتبدأ بيها.</p>
-      <ul id="queue"></ul>
-    </section>
-  </div>
 
-  <div class="split">
-    <section class="history" aria-labelledby="histTitle">
-      <h2 id="histTitle">اللي حصل</h2>
-      <ol id="history"></ol>
-    </section>
-    <section class="rules" aria-labelledby="rulesTitle">
-      <div class="rules-head">
-        <h2 id="rulesTitle">الثوابت</h2>
-        <div class="tabs" role="tablist">
-          <button role="tab" class="chip on" data-r="thawabit" aria-selected="true">الثوابت بتاعتك</button>
-          <button role="tab" class="chip" data-r="runbook" aria-selected="false">دليل التشغيل</button>
+    <main id="view" tabindex="-1">
+      <!-- ============ HOME ============ -->
+      <section class="page" data-page="home">
+        <div class="day card" aria-labelledby="dayTitle">
+          <div class="day-head">
+            <div>
+              <h2 id="dayTitle">الدورة الجاية</h2>
+              <p class="count" id="countdown">--:--:--</p>
+              <p class="muted" id="nextLabel"></p>
+            </div>
+            <div class="last" id="lastRun"></div>
+          </div>
+          <div class="ruler" aria-hidden="true">
+            <div class="ticks" id="ticks"></div>
+            <div class="playhead" id="playhead"><span id="nowLabel"></span></div>
+          </div>
         </div>
-      </div>
-      <textarea id="rulesText" spellcheck="false" aria-label="نص القواعد"></textarea>
-      <div class="rules-foot"><span class="muted" id="rulesInfo"></span><button class="btn" id="saveRules">احفظ التعديل</button></div>
-    </section>
+
+        <div class="kpis">
+          <a class="kpi card" href="#/subjects"><svg class="ring" viewBox="0 0 44 44"><circle r="18" cx="22" cy="22"/><circle class="arc" r="18" cx="22" cy="22" id="ringLect" style="--c:var(--mm)"/></svg><div><b class="num" id="kLect">0</b><span>محاضرة كاملة من <i id="kLectAll">0</i></span></div></a>
+          <a class="kpi card" href="#/books"><svg class="ring" viewBox="0 0 44 44"><circle r="18" cx="22" cy="22"/><circle class="arc" r="18" cx="22" cy="22" id="ringBooks" style="--c:var(--sl)"/></svg><div><b class="num" id="kBooks">0</b><span>جزء كتاب جاهز من <i id="kBooksAll">0</i></span></div></a>
+          <a class="kpi card" href="#/inbox"><svg class="ring" viewBox="0 0 44 44"><circle r="18" cx="22" cy="22"/><circle class="arc" r="18" cx="22" cy="22" id="ringInbox" style="--c:var(--ar)"/></svg><div><b class="num" id="kInbox">0</b><span>ملف في الوارد مستني</span></div></a>
+          <div class="kpi card"><svg class="ring" viewBox="0 0 44 44"><circle r="18" cx="22" cy="22"/><circle class="arc" r="18" cx="22" cy="22" id="ringPdf" style="--c:var(--tr)"/></svg><div><b class="num" id="kPdf">0</b><span>ملف PDF على الماك</span></div></div>
+        </div>
+
+        <div class="deck">
+          <button class="cmd" data-run="pull"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg><b>هات الجديد ورتّبه</b><small>بيسحب من الدرايف ويعمل لكل ملف فولدره</small></button>
+          <button class="cmd" data-run="push"><svg viewBox="0 0 24 24"><path d="M12 19V7m0 0-5 5m5-5 5 5M4 4h16"/></svg><b>ارفع على الدرايف</b><small>بيضيف الجديد بس، مبيمسحش حاجة</small></button>
+          <button class="cmd" data-run="check"><svg viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></svg><b>اتأكد من unsorted</b><small>يقارن الجهاز بالدرايف</small></button>
+          <button class="cmd" data-run="checkall"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10m3 0 2 2 3-4"/></svg><b>اتأكد من كل المحاضرات</b><small>فحص كامل لكل الفولدرات</small></button>
+        </div>
+
+        <div class="console card" aria-labelledby="consoleTitle">
+          <div class="row-head">
+            <h2 id="consoleTitle">الشاشة</h2>
+            <div class="row-actions"><span class="state" id="jobState">مستني أمر</span><button class="btn ghost small" id="cancelJob" hidden>وقّف</button></div>
+          </div>
+          <pre id="log" aria-live="polite"></pre>
+        </div>
+      </section>
+
+      <!-- ============ SUBJECTS ============ -->
+      <section class="page" data-page="subjects" hidden>
+        <div class="card">
+          <div class="row-head">
+            <div class="filters" role="group" aria-label="فلتر">
+              <button class="chip on" data-f="all">الكل</button>
+              <button class="chip" data-f="miss">ناقصها حاجة</button>
+              <button class="chip" data-f="done">كاملة</button>
+            </div>
+            <input type="search" id="q" placeholder="دوّر على محاضرة…" aria-label="بحث">
+          </div>
+          <ul class="legend" id="legend"></ul>
+          <div id="trackList"></div>
+        </div>
+        <div class="card">
+          <h2>نسبة التجهيز</h2>
+          <div id="meters"></div>
+        </div>
+      </section>
+
+      <!-- ============ BOOKS ============ -->
+      <section class="page" data-page="books" hidden>
+        <p class="lead">كل كتاب كبير متقسم أجزاء، كل جزء فيه فصلين تقريبًا، وكل جزء ليه سلايدز بلغة الكتاب وسلايدز عربي. المربع المنوّر يعني الملف جاهز.</p>
+        <div class="books" id="books"></div>
+      </section>
+
+      <!-- ============ INBOX ============ -->
+      <section class="page" data-page="inbox" hidden>
+        <div class="drop card" id="drop">
+          <h2>ضيف محاضرة جديدة</h2>
+          <p class="muted">ارمي الملفات هنا أو اختارها. هتتحط جوه unsorted في المادة اللي تختارها، وبعدين دوس «ارفع على الدرايف» والطيار الآلي يكمّل الباقي.</p>
+          <div class="drop-row">
+            <label>المادة/القسم<select id="dest"></select></label>
+            <label class="pick">اختار ملفات<input type="file" id="files" multiple accept=".pdf,.pptx,.ppt,.docx,.doc"></label>
+          </div>
+          <ul id="uploads"></ul>
+        </div>
+        <div class="split">
+          <div class="card">
+            <h2>في unsorted دلوقتي</h2>
+            <ul class="list" id="pending"></ul>
+          </div>
+          <div class="card">
+            <h2>طلبات للطيار الآلي</h2>
+            <p class="muted">أي محاضرة تطلب تكملتها بتستنى هنا، والدورة الجاية بتبدأ بيها.</p>
+            <ul class="list" id="queue"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ ACTIVITY ============ -->
+      <section class="page" data-page="activity" hidden>
+        <div class="card"><ol class="timeline" id="history"></ol></div>
+      </section>
+
+      <!-- ============ RULES ============ -->
+      <section class="page" data-page="rules" hidden>
+        <div class="card">
+          <div class="row-head">
+            <div class="tabs" role="tablist">
+              <button role="tab" class="chip on" data-r="thawabit" aria-selected="true">الثوابت بتاعتك</button>
+              <button role="tab" class="chip" data-r="runbook" aria-selected="false">دليل التشغيل</button>
+            </div>
+            <span class="muted" id="rulesInfo"></span>
+          </div>
+          <textarea id="rulesText" spellcheck="false" aria-label="نص القواعد"></textarea>
+          <div class="row-foot"><button class="btn" id="saveRules">احفظ التعديل</button></div>
+        </div>
+      </section>
+
+      <!-- ============ SETTINGS ============ -->
+      <section class="page" data-page="settings" hidden>
+        <div class="split">
+          <div class="card">
+            <h2>الطيار الآلي</h2>
+            <p class="muted">بيشتغل ٣ مرات في اليوم: ٩ الصبح، و٣ العصر، و٩ بالليل. بيسحب الجديد، يعمل كل الملفات، يكمّل أجزاء الكتب، ويرفع.</p>
+            <div class="setting"><span>الحالة</span><b id="sPilot">…</b></div>
+            <div class="setting"><span>الدورة الجاية</span><b id="sNext">…</b></div>
+            <div class="setting"><span>شغّله دلوقتي</span><button class="btn small" id="openClaude">افتح Claude</button></div>
+            <p class="muted small">التشغيل الفوري بيتعمل من Claude: Scheduled ← lectures-unsorted-autopilot ← Run now.</p>
+          </div>
+          <div class="card">
+            <h2>الاتصال بالدرايف</h2>
+            <div class="setting"><span>الدرايف</span><b id="hDrive">…</b></div>
+            <div class="setting"><span>المساحة</span><b id="hSpace">…</b></div>
+            <div class="warn" id="hKey" hidden>
+              <b>مفتاح rclone عام ومشترك</b>
+              <p>ده سبب إن الرفع ساعات بيبقى بطيء، وGoogle هيقفله خلال 2026. الحل مفتاح خاص بيك من Google Cloud، والتسجيل بيتعمل منك.</p>
+            </div>
+            <div class="row-foot"><button class="btn ghost small" id="recheck">افحص تاني</button></div>
+          </div>
+        </div>
+        <div class="split">
+          <div class="card">
+            <h2>التطبيق</h2>
+            <p class="muted">نزّل اللوحة كتطبيق، هتفتح في شباك لوحدها ويبقى ليها أيقونة في الـDock.</p>
+            <div class="row-foot"><button class="btn" id="install" hidden>نزّل كتطبيق</button><span class="muted small" id="installHint">من Chrome: القايمة ← حفظ ومشاركة ← تثبيت الصفحة كتطبيق.</span></div>
+            <div class="setting"><span>فولدر المحاضرات</span><button class="btn ghost small" id="openRoot">افتحه</button></div>
+          </div>
+          <div class="card about">
+            <div class="about-mark" aria-hidden="true">M</div>
+            <div>
+              <h2>عن المطوّر</h2>
+              <p>اللوحة دي معمولة على إيد <strong>Morfi</strong>: موشن ديزاينر ومونتير فيديو بقاله ٣ سنين، ومطوّر ويب. كل حتة حركة هنا متصممة بنفس عين المونتاج: الخط الزمني، رأس التشغيل، والتراكات الملوّنة.</p>
+              <a class="btn" href="https://morfi28i.github.io/portfolio/" target="_blank" rel="noopener">شوف البورتفوليو</a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>Designed &amp; developed by <a href="https://morfi28i.github.io/portfolio/" target="_blank" rel="noopener">Morfi</a></footer>
   </div>
-
-  <section class="about" aria-labelledby="aboutTitle">
-    <div class="about-mark" aria-hidden="true">M</div>
-    <div>
-      <h2 id="aboutTitle">عن المطوّر</h2>
-      <p>اللوحة دي معمولة على إيد <strong>Morfi</strong>: موشن ديزاينر ومونتير فيديو بقاله ٣ سنين، ومطوّر ويب. كل حتة حركة هنا متصممة بنفس عين المونتاج: الخط الزمني، رأس التشغيل، والتراكات الملوّنة.</p>
-      <a class="btn" href="https://morfi28i.github.io/portfolio/" target="_blank" rel="noopener">شوف البورتفوليو</a>
-    </div>
-  </section>
-</main>
-
-<footer>Designed &amp; developed by <a href="https://morfi28i.github.io/portfolio/" target="_blank" rel="noopener">Morfi</a></footer>
+</div>
 
 <dialog id="drawer" aria-labelledby="dTitle">
   <form method="dialog" class="d-close"><button aria-label="اقفل">×</button></form>
@@ -158,7 +219,7 @@
   <div class="d-keys" id="dKeys"></div>
   <h3>الملفات</h3>
   <ul class="d-files" id="dFiles"></ul>
-  <div class="d-ask" id="dAsk">
+  <div class="d-ask">
     <h3>اطلب من الطيار الآلي</h3>
     <textarea id="dNote" rows="2" placeholder="مثلاً: اعمل السلايدز العربي، أو اعمل presenter عشان دي آخر محاضرة"></textarea>
     <button class="btn" id="dQueue">ضيفها للطلبات</button>
