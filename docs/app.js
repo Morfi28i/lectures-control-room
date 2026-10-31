@@ -431,7 +431,7 @@ function drawActivity() {
 // subjects: completion per subject as horizontal bars
 function drawSubjects() {
   const L = S.items.filter((i) => i.lecture && !i.inUnsorted), subs = [...new Set(L.map((i) => i.subject))];
-  const colors = ['tr', 'mm', 'sl', 'ar', 'pr', 'en'];
+  const colors = ['acc'];
   $('#subjectBars').innerHTML = subs.map((s, n) => {
     const x = L.filter((i) => i.subject === s), ok = x.filter((i) => !i.missing.length).length, pct = x.length ? (ok / x.length) * 100 : 0;
     return `<a class="hbar" href="#/subjects" style="text-decoration:none;color:inherit"><div><b>${esc(s)}</b><span>${ar.format(ok)}/${ar.format(x.length)}</span></div><span class="tr"><i style="width:${pct}%;--c:var(--${colors[n % colors.length]});--i:${n}"></i></span></a>`;
@@ -465,7 +465,7 @@ sizeFx(); addEventListener('resize', sizeFx);
 function burst(el) {
   if (reduced || !el) return;
   const r = el.getBoundingClientRect(), cx = (r.left + r.width / 2) * devicePixelRatio, cy = (r.top + r.height / 2) * devicePixelRatio;
-  const cols = ['#a593ff', '#39c9b2', '#f3b33f', '#f27ba0', '#59aef2', '#a8d65c'];
+  const cs = getComputedStyle(document.documentElement), cols = [cs.getPropertyValue('--acc-a').trim(), cs.getPropertyValue('--acc-b').trim(), '#ffffff'];
   for (let n = 0; n < 70; n++) { const a = Math.random() * Math.PI * 2, v = (2 + Math.random() * 6) * devicePixelRatio; parts.push({ x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 3 * devicePixelRatio, life: 1, c: cols[n % cols.length], s: (3 + Math.random() * 4) * devicePixelRatio, rot: Math.random() * 6 }); }
   if (parts.length === 70) requestAnimationFrame(fxLoop);
 }
@@ -535,7 +535,7 @@ function sparkPath(vals, w = 120, h = 26) {
   return { line, area: `${line} L${w} ${h} L0 ${h} Z` };
 }
 function drawSparks() {
-  const { c } = dailyCounts(14), colors = ['--mm', '--sl', '--ar', '--tr'];
+  const { c } = dailyCounts(14), colors = ['--acc', '--acc', '--acc', '--acc'];
   $$('.kpi').forEach((k, n) => {
     let svg = k.querySelector('.spark');
     if (!svg) { k.querySelector(':scope > div').insertAdjacentHTML('beforeend', `<svg class="spark" viewBox="0 0 120 26" preserveAspectRatio="none" style="--c:var(${colors[n]})"><path class="area"/><path class="ln"/></svg>`); svg = k.querySelector('.spark'); }
@@ -558,7 +558,7 @@ addEventListener('pointermove', (e) => {
 (() => {
   const cv = $('#stars'); if (!cv || reduced) return;
   const ctx = cv.getContext('2d'); let W, H, st = [];
-  const size = () => { const r = cv.getBoundingClientRect(); W = cv.width = r.width * devicePixelRatio; H = cv.height = r.height * devicePixelRatio; st = [...Array(60)].map(() => ({ x: Math.random() * W, y: Math.random() * H, r: (Math.random() * 1.6 + .3) * devicePixelRatio, v: (Math.random() * .25 + .05) * devicePixelRatio, a: Math.random() * Math.PI * 2, c: ['#9b7bff', '#18e6c4', '#ff5fa8', '#3cb4ff', '#ffffff'][Math.floor(Math.random() * 5)] })); };
+  const size = () => { const r = cv.getBoundingClientRect(); W = cv.width = r.width * devicePixelRatio; H = cv.height = r.height * devicePixelRatio; st = [...Array(60)].map(() => ({ x: Math.random() * W, y: Math.random() * H, r: (Math.random() * 1.6 + .3) * devicePixelRatio, v: (Math.random() * .25 + .05) * devicePixelRatio, a: Math.random() * Math.PI * 2, c: ['#3cb4ff', '#18e6c4', '#ffffff'][Math.floor(Math.random() * 3)] })); };
   size(); new ResizeObserver(size).observe(cv);
   (function loop() {
     if (!document.hidden && route === 'home') {

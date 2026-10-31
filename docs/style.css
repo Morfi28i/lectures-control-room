@@ -572,3 +572,45 @@ h1 { background: linear-gradient(90deg, var(--ink), var(--tr) 60%, var(--ar)); -
 .swatch { width: 44px; height: 44px; border-radius: 12px; border: 2px solid transparent; cursor: pointer; background: linear-gradient(135deg, var(--sw-a), var(--sw-b)); transition: transform .2s var(--ease), border-color .2s; }
 .swatch:hover { transform: translateY(-2px) scale(1.05); }
 .swatch[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pr) 40%, transparent); }
+
+/* ===== harmony pass: one UI accent (sky → teal) on every base; track colours only mean data ===== */
+:root { --acc-a: #3cb4ff; --acc-b: #18e6c4; --acc: #3cb4ff; --grad: linear-gradient(120deg, var(--acc-a), var(--acc-b)); --grad2: var(--grad); }
+:root[data-base="plum"] { --acc-a: #9b7bff; --acc-b: #3cb4ff; --acc: #9b7bff; }
+:root[data-base="teal"] { --acc-a: #18e6c4; --acc-b: #a6f04a; --acc: #18e6c4; }
+:focus-visible { outline-color: var(--acc); }
+h1 { background: linear-gradient(90deg, var(--ink) 30%, var(--acc-a)); -webkit-background-clip: text; background-clip: text; }
+.book-head h2 { background: none; color: var(--ink); }
+.btn:not(.ghost), .pick { background: var(--grad); color: #04121f !important; box-shadow: 0 6px 20px -10px var(--acc); }
+.chip.on { background: var(--grad); color: #04121f; }
+.pilot input:checked + .knob { background: var(--grad); box-shadow: 0 0 14px -3px var(--acc); }
+.nav a.on { background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 18%, var(--panel-2))); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 35%, transparent); }
+.nav a.on::before { background: var(--acc); }
+.nav a.on svg { color: var(--acc); }
+.nav a:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 25%, transparent); }
+.count { background: linear-gradient(90deg, var(--ink), color-mix(in srgb, var(--acc) 75%, var(--ink))); -webkit-background-clip: text; background-clip: text; }
+/* one card recipe everywhere: same panel, faint accent wash, same hover */
+.kpi:nth-child(n) { background: linear-gradient(135deg, color-mix(in srgb, var(--acc) 7%, var(--panel)), var(--panel)); }
+.card:hover { box-shadow: 0 18px 40px -26px color-mix(in srgb, var(--acc) 80%, transparent); }
+.cmd svg, .cmd:nth-child(n) svg { stroke: var(--acc); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--acc) 50%, transparent)); }
+.cmd.running { border-color: var(--acc); }
+.cmd.running::after, .eq i { background: var(--acc); }
+.ripple { background: color-mix(in srgb, var(--acc) 40%, transparent); }
+.bars span { background: linear-gradient(180deg, var(--acc-a), color-mix(in srgb, var(--acc-b) 35%, transparent)); }
+.heat i { background: color-mix(in srgb, var(--acc) calc(var(--v) * 100%), #ffffff0a); box-shadow: 0 0 calc(var(--v) * 10px) color-mix(in srgb, var(--acc) calc(var(--v) * 70%), transparent); }
+.drop.over { border-color: var(--acc); background: color-mix(in srgb, var(--acc) 8%, var(--panel)); }
+#uploads .bar-p i, .bar-mini i { background: var(--acc); }
+.dot.ok { background: var(--acc-b); box-shadow: 0 0 0 4px color-mix(in srgb, var(--acc-b) 20%, transparent); }
+a { color: var(--acc); }
+/* hero border uses the accent pair plus the play red only */
+.glow-border { background:
+  radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--acc-a) 18%, transparent), transparent 60%) padding-box,
+  radial-gradient(90% 120% at 0% 100%, color-mix(in srgb, var(--acc-b) 12%, transparent), transparent 60%) padding-box,
+  linear-gradient(var(--panel), var(--panel)) padding-box,
+  conic-gradient(from var(--ang), var(--acc-a), var(--acc-b), transparent 40%, transparent 60%, var(--acc-a)) border-box; }
+.splash { background: radial-gradient(60% 60% at 50% 45%, color-mix(in srgb, var(--acc) 22%, transparent), var(--bg)); }
+/* ambient lights follow the accent, not every track colour */
+.ambient i:nth-child(1) { background: var(--acc-a); }
+.ambient i:nth-child(2) { background: var(--acc-b); }
+.ambient i:nth-child(3), .ambient i:nth-child(4) { background: var(--acc-a); opacity: .1; }
+.about-mark { background: var(--grad); color: #04121f; animation: none; }
+.palbtn kbd { border-color: color-mix(in srgb, var(--acc) 40%, var(--line)); }
