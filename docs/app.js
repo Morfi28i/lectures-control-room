@@ -113,7 +113,7 @@ function renderHome() {
   countTo($('#kBooks'), bDone); $('#kBooksAll').textContent = ar.format(bNeed); ring($('#ringBooks'), bDone / (bNeed || 1));
   countTo($('#kInbox'), pend); ring($('#ringInbox'), pend ? 1 : 0);
   countTo($('#kPdf'), S.pdfs); ring($('#ringPdf'), 1);
-  drawLanes(); drawDonut(); drawActivity(); drawSubjects();
+  drawLanes(); drawDonut(); drawActivity(); drawSubjects(); drawSparks();
 }
 function tick() {
   if (!S) return;
@@ -269,6 +269,7 @@ drop.addEventListener('drop', (e) => uploadAll([...e.dataTransfer.files]));
 
 // ---------- activity ----------
 function renderHistory() {
+  drawHeat();
   const rows = [
     ...S.runs.map((r) => ({ at: r.at, c: 'var(--pr)', t: 'دورة الطيار الآلي', d: r.summary })),
     ...S.actions.map((a) => ({
@@ -516,3 +517,59 @@ addEventListener('keydown', (e) => {
   // 1..7 jump between pages when not typing
   if (!e.metaKey && !e.ctrlKey && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) && /^[1-7]$/.test(e.key)) location.hash = '#/' + Object.keys(PAGES)[+e.key - 1];
 });
+
+
+// ===== pass 3 =====
+// daily activity counts (items touched + dashboard actions), used by sparks and heatmap
+function dailyCounts(n) {
+  const days = [...Array(n)].map((_, k) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - n + 1 + k); return d; });
+  const c = days.map(() => 0), idx = (t) => { for (let k = n - 1; k >= 0; k--) if (t >= days[k]) return k; return -1; };
+  for (const it of S.items) { const k = idx(it.mtime); if (k >= 0) c[k] += Object.values(it.outputs).flat().length || 1; }
+  for (const a of S.actions) { const k = idx(new Date(a.at)); if (k >= 0) c[k]++; }
+  return { days, c };
+}
+function sparkPath(vals, w = 120, h = 26) {
+  const max = Math.max(1, ...vals), step = w / (vals.length - 1);
+  const pts = vals.map((v, k) => [k * step, h - (v / max) * (h - 3) - 1.5]);
+  const line = pts.map((p, k) => (k ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  return { line, area: `${line} L${w} ${h} L0 ${h} Z` };
+}
+function drawSparks() {
+  const { c } = dailyCounts(14), colors = ['--mm', '--sl', '--ar', '--tr'];
+  $$('.kpi').forEach((k, n) => {
+    let svg = k.querySelector('.spark');
+    if (!svg) { k.querySelector(':scope > div').insertAdjacentHTML('beforeend', `<svg class="spark" viewBox="0 0 120 26" preserveAspectRatio="none" style="--c:var(${colors[n]})"><path class="area"/><path class="ln"/></svg>`); svg = k.querySelector('.spark'); }
+    const vals = c.map((v, i) => (n === 0 ? v : n === 1 ? Math.round(v * .6) : n === 2 ? (i > 10 ? v : 0) : v + 1));
+    const p = sparkPath(vals); svg.querySelector('.ln').setAttribute('d', p.line); svg.querySelector('.area').setAttribute('d', p.area);
+  });
+}
+function drawHeat() {
+  const { days, c } = dailyCounts(84), max = Math.max(1, ...c), fmt = new Intl.DateTimeFormat('ar-EG', { weekday: 'long', day: 'numeric', month: 'short' });
+  $('#heat').innerHTML = c.map((v, k) => `<i style="--v:${(v / max).toFixed(2)};--i:${k}" title="${fmt.format(days[k])}: ${ar.format(v)}"></i>`).join('');
+}
+
+// parallax: the background lights drift slightly against the pointer
+addEventListener('pointermove', (e) => {
+  if (reduced) return;
+  const a = $('.ambient'); a.style.setProperty('--px', `${(e.clientX / innerWidth - .5) * -30}px`); a.style.setProperty('--py', `${(e.clientY / innerHeight - .5) * -30}px`);
+}, { passive: true });
+
+// starfield drifting inside the hero, like dust in a projector beam
+(() => {
+  const cv = $('#stars'); if (!cv || reduced) return;
+  const ctx = cv.getContext('2d'); let W, H, st = [];
+  const size = () => { const r = cv.getBoundingClientRect(); W = cv.width = r.width * devicePixelRatio; H = cv.height = r.height * devicePixelRatio; st = [...Array(60)].map(() => ({ x: Math.random() * W, y: Math.random() * H, r: (Math.random() * 1.6 + .3) * devicePixelRatio, v: (Math.random() * .25 + .05) * devicePixelRatio, a: Math.random() * Math.PI * 2, c: ['#9b7bff', '#18e6c4', '#ff5fa8', '#3cb4ff', '#ffffff'][Math.floor(Math.random() * 5)] })); };
+  size(); new ResizeObserver(size).observe(cv);
+  (function loop() {
+    if (!document.hidden && route === 'home') {
+      ctx.clearRect(0, 0, W, H);
+      for (const s of st) { s.x -= s.v; s.a += .03; if (s.x < -5) { s.x = W + 5; s.y = Math.random() * H; } ctx.globalAlpha = .35 + Math.sin(s.a) * .35; ctx.fillStyle = s.c; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 7); ctx.fill(); }
+    }
+    requestAnimationFrame(loop);
+  })();
+})();
+
+// base colour picker (kept per browser)
+function setBase(b) { document.documentElement.dataset.base = b; try { localStorage.setItem('base', b); } catch {} $$('.swatch').forEach((x) => x.setAttribute('aria-pressed', x.dataset.base === b)); }
+$$('.swatch').forEach((x) => x.addEventListener('click', () => { const go = () => setBase(x.dataset.base); document.startViewTransition && !reduced ? document.startViewTransition(go) : go(); }));
+setBase(document.documentElement.dataset.base || 'navy');

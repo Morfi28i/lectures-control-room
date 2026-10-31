@@ -1,9 +1,10 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="ar" dir="rtl" data-base="navy">
+<script>try{document.documentElement.dataset.base=localStorage.getItem("base")||"navy"}catch{}</script>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#17123a">
+<meta name="theme-color" content="#0a1022">
 <title>غرفة تحكم المحاضرات</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -71,7 +72,8 @@
     <main id="view" tabindex="-1">
       <!-- ============ HOME ============ -->
       <section class="page" data-page="home">
-        <div class="day card" aria-labelledby="dayTitle">
+        <div class="day card glow-border" aria-labelledby="dayTitle">
+          <canvas class="stars" id="stars" aria-hidden="true"></canvas>
           <div class="day-head">
             <div>
               <h2 id="dayTitle">الدورة الجاية</h2>
@@ -184,6 +186,11 @@
 
       <!-- ============ ACTIVITY ============ -->
       <section class="page" data-page="activity" hidden>
+        <div class="card">
+          <h2>خريطة النشاط</h2>
+          <p class="muted">كل مربع يوم، وكل ما لونه يغمق كان فيه شغل أكتر. آخر ١٢ أسبوع.</p>
+          <div class="heat" id="heat"></div>
+        </div>
         <div class="card"><ol class="timeline" id="history"></ol></div>
       </section>
 
@@ -229,6 +236,14 @@
             <h2>التطبيق</h2>
             <p class="muted">نزّل اللوحة كتطبيق، هتفتح في شباك لوحدها ويبقى ليها أيقونة في الـDock.</p>
             <div class="row-foot"><button class="btn" id="install" hidden>نزّل كتطبيق</button><span class="muted small" id="installHint">من Chrome: القايمة ← حفظ ومشاركة ← تثبيت الصفحة كتطبيق.</span></div>
+            <div class="setting"><span>اللون الأساسي</span>
+              <div class="swatches" role="group" aria-label="اللون الأساسي">
+                <button class="swatch" data-base="navy" title="كحلي" style="--sw-a:#0a1022;--sw-b:#18233f"></button>
+                <button class="swatch" data-base="charcoal" title="فحمي" style="--sw-a:#0c0d10;--sw-b:#1d2027"></button>
+                <button class="swatch" data-base="teal" title="أخضر بترولي" style="--sw-a:#061a1c;--sw-b:#123135"></button>
+                <button class="swatch" data-base="plum" title="بنفسجي" style="--sw-a:#17123a;--sw-b:#2e2563"></button>
+              </div>
+            </div>
             <div class="setting"><span>فولدر المحاضرات</span><button class="btn ghost small" id="openRoot">افتحه</button></div>
           </div>
           <div class="card about">
