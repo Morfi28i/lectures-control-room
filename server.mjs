@@ -120,7 +120,7 @@ function startJob(action, custom) {
   const push = (line) => { j.lines.push(line); for (const c of j.clients) c.write(`data: ${JSON.stringify({ line })}\n\n`); };
   const p = spawn(a.cmd[0], a.cmd[1], { env: ENV, detached: true });
   j.proc = p;
-  const feed = (buf) => buf.toString().split('\n').map((l) => l.replace(/^\d{4}\/\d\d\/\d\d \d\d:\d\d:\d\d (NOTICE|INFO|ERROR) ?:? ?/, '')).filter((l) => l.trim() && !/client_id/.test(l)).forEach(push);
+  const feed = (buf) => buf.toString().split('\n').map((l) => l.replace(/^\d{4}\/\d\d\/\d\d \d\d:\d\d:\d\d (NOTICE|INFO|ERROR|DEBUG)\s*:?\s*/, '').replace(/^:\s*/, '')).filter((l) => l.trim() && !/client_id|modification time|transaction limiter|Waiting for checks/.test(l)).forEach(push);
   p.stdout.on('data', feed); p.stderr.on('data', feed);
   p.on('error', (e) => push('خطأ: ' + e.message));
   p.on('close', (code) => {
@@ -392,6 +392,6 @@ http.createServer(async (req, res) => {
     }
     send(res, 404, { error: 'not found' });
   } catch (e) {
-    send(res, 500, { error: e.message });
+    send(res, /برا فولدر/.test(e.message) ? 400 : 500, { error: e.message });
   }
 }).listen(PORT, '127.0.0.1', () => console.log(`Lectures control room → http://localhost:${PORT}`));
