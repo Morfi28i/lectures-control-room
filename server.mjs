@@ -5,8 +5,9 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { load as settings, save as saveSettings, SCHEMA, GROUPS } from '../settings.mjs';
 
 const PORT = Number(process.env.PORT || 4545);
 const HOME = os.homedir();
@@ -18,7 +19,15 @@ const PAUSED = path.join(KIT, 'PAUSED');
 const QUEUE = path.join(KIT, 'queue.json');
 const REMOTE = 'gdfull:1st Physics Group (B)';
 const AUTOSYNC = path.join(KIT, 'AUTOSYNC');
-const SCHEDULE = [9, 15, 21]; // hours of the 3 daily autopilot runs (set in the Claude app's scheduled task)
+const ACCOUNTS = path.join(KIT, 'accounts.json');
+const DOWNLOADS = path.join(HOME, 'Downloads');
+// the worker (worker/worker.mjs, launchd com.morfi.lectures-worker) makes the outputs on its own; its schedule lives in its config
+const WORKER = path.join(KIT, 'worker');
+const WTASKS = path.join(WORKER, 'tasks.json'), WSTATUS = path.join(WORKER, 'status.json');
+const jread = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
+const jwrite = (f, v) => { fs.writeFileSync(f + '.tmp', JSON.stringify(v, null, 2)); fs.renameSync(f + '.tmp', f); };
+const schedule = () => { const h = settings()['worker.schedule']; return h.length ? h : [9, 15, 21]; };
+const OUTS = ['SRC', 'AR', 'EN', 'PR']; // slides only (Morfi: no summary, no mind map)
 const RULES = {
   runbook: path.join(KIT, 'RUNBOOK.md'),
   thawabit: path.join(ROOT, 'NotebookLM - الثوابت.md'),
@@ -76,10 +85,10 @@ function scan() {
     const key = (inUnsorted ? parts.slice(1) : parts).join('/');
     const sub = inUnsorted ? (['Not summarized', 'summarized'].includes(parts[1]) ? parts[2] || parts[1] : parts[1] || 'unsorted') : parts[0];
     const last = parts[parts.length - 1];
-    const lecture = !CATS.has(key) && last !== 'Book' && parts.length > (inUnsorted ? 2 : 1);
+    const lecture = !CATS.has(key) && last !== 'Book' && parts.length > (inUnsorted ? 2 : 1) && !rel.includes('روابط وملفات عامة');
     const main = sources.find((s) => last.trim().startsWith(path.parse(s.name).name.trim()) || path.parse(s.name).name.trim().startsWith(last.trim())) || sources[0];
     const lang = main ? (AR.test(main.name) ? 'ar' : 'en') : 'en';
-    const need = ['sl', 'tr', 'mm', ...(lang === 'en' ? ['ar'] : [])];
+    const need = ['sl', ...(lang === 'en' ? ['ar'] : [])]; // no translation / mind map since 2026-11-03
     const missing = lecture ? need.filter((k) => !outputs[k]) : [];
     items.push({
       id: Buffer.from(rel).toString('base64url'), rel, name: last.trim(), subject: (sub || '').trim(), inUnsorted, lecture, lang,
@@ -96,45 +105,187 @@ function readJSONL(f, n = 40) {
 }
 const readQueue = () => { try { return JSON.parse(fs.readFileSync(QUEUE, 'utf8')); } catch { return []; } };
 const writeQueue = (q) => fs.writeFileSync(QUEUE, JSON.stringify(q, null, 2));
-const logAction = (o) => fs.appendFileSync(path.join(LOGS, 'actions.jsonl'), JSON.stringify({ at: new Date().toISOString(), ...o }) + '\n');
+function rotate(f) {
+  try { if (fs.statSync(f).size > settings()['safe.logMB'] * 1e6) fs.renameSync(f, path.join(HOME, '.Trash', `${path.basename(f)}.${Date.now()}`)); } catch {}
+}
+const logAction = (o) => rotate(path.join(LOGS, 'actions.jsonl')) || fs.appendFileSync(path.join(LOGS, 'actions.jsonl'), JSON.stringify({ at: new Date().toISOString(), ...o }) + '\n');
 
 // ---------- jobs (whitelisted commands only) ----------
 const ACTIONS = {
   pull: { label: 'سحب الجديد من الدرايف وترتيبه', cmd: ['sh', [path.join(KIT, 'inbox.sh')]] },
-  push: { label: 'رفع الجديد على الدرايف', cmd: ['sh', [path.join(KIT, 'push.sh')]] },
+  // same job as push.sh (copy unsorted up, then check), run directly so the speed guard can see rclone's stats
+  push: { label: 'رفع الجديد على الدرايف', transfer: true, cmd: (mode) => ['sh', ['-c', 'L="$1"; R="$2"; shift 2; rclone copy "$L" "$R" "$@"; echo "— فحص —"; rclone check "$L" "$R" --one-way --size-only --exclude .DS_Store 2>&1 | grep -E "differences|ERROR"', 'sh', UNSORTED, `${REMOTE}/unsorted`, ...tune(upFlags(), mode), '--drive-chunk-size', mode === 'chunks' ? '64M' : '16M', '-v', '--stats-one-line', '--stats', '15s']] },
   check: { label: 'فحص تطابق الدرايف', cmd: ['rclone', ['check', UNSORTED, 'gdfull:1st Physics Group (B)/unsorted', '--one-way', '--exclude', '.DS_Store']] },
   checkall: { label: 'فحص تطابق كل المحاضرات', cmd: ['rclone', ['check', ROOT, 'gdfull:1st Physics Group (B)', '--one-way', '--exclude', '.DS_Store', '--exclude', '*.md']] },
   runnow: { label: 'تشغيل الخطوات دلوقتي', drive: true, cmd: ['sh', ['-c', `sh "${path.join(KIT, 'inbox.sh')}"; echo "— رفع —"; sh "${path.join(KIT, 'push.sh')}"; echo "خلص"`]] },
-  pushall: { label: 'رفع كل الجديد من الماك على الدرايف', drive: true, cmd: ['rclone', ['copy', ROOT, REMOTE, '--exclude', '.DS_Store', '--tpslimit', '2', '--transfers', '2', '--retries', '10', '--low-level-retries', '30', '-v', '--stats-one-line', '--stats', '15s']] },
-  pullall: { label: 'تنزيل الجديد من الدرايف على الماك', drive: true, cmd: ['rclone', ['copy', REMOTE, ROOT, '--ignore-existing', '--exclude', '.DS_Store', '--tpslimit', '4', '-v', '--stats-one-line', '--stats', '15s']] },
+  pushall: { label: 'رفع كل الجديد من الماك على الدرايف', drive: true, transfer: true, cmd: (mode) => ['rclone', ['copy', ROOT, REMOTE, ...tune(upFlags(), mode), ...chunk(mode), '--low-level-retries', '30', '-v', '--stats-one-line', '--stats', '15s']] },
+  pullall: { label: 'تنزيل الجديد من الدرايف على الماك', drive: true, transfer: true, cmd: (mode) => ['rclone', ['copy', REMOTE, ROOT, '--ignore-existing', ...excludes(), ...tune(['--tpslimit', String(settings()['drive.tpslimit'] * 2), '--transfers', '4'], mode), '-v', '--stats-one-line', '--stats', '15s']] },
+  finish: { label: 'نقل اللي خلص من unsorted لفولدر المادة', drive: true, cmd: ['sh', [path.join(KIT, 'finish.sh')]] },
+  // read only: lists files that share a name inside the same Drive folder, changes nothing
+  dupes: { label: 'دوّر على ملفات مكررة على الدرايف', cmd: ['rclone', ['dedupe', '--dedupe-mode', 'list', REMOTE, '--tpslimit', '2']] }, // read only
 };
+// commands that write to Drive or the Mac's lecture folders; two of them at once can make duplicate files on Drive
+// rclone flags from the «الدرايف والمزامنة» settings
+const excludes = () => settings()['drive.exclude'].flatMap((x) => ['--exclude', x]);
+const upFlags = () => { const S = settings(); return [...(S['drive.newerWins'] ? ['--update'] : []), ...excludes(), '--tpslimit', String(S['drive.tpslimit']), '--transfers', String(S['drive.transfers']), '--retries', String(S['drive.retries'])]; };
+// speed-guard variants of a transfer: normal, gentle (one file at a time, slow request rate), chunks (bigger upload pieces)
+function tune(args, mode) {
+  const a = [...args], set = (flag, v) => { const i = a.indexOf(flag); if (i >= 0) a[i + 1] = v; else a.push(flag, v); };
+  if (mode === 'gentle') { set('--transfers', '1'); set('--tpslimit', '1'); set('--checkers', '2'); }
+  if (mode === 'chunks') set('--transfers', '2');
+  return a;
+}
+const chunk = (mode) => (mode === 'chunks' ? ['--drive-chunk-size', '64M'] : []);
+const WRITES = new Set(['finish', 'pull', 'push', 'runnow', 'pushall', 'pullall', 'up', 'down']);
+// rclone / download watchers running outside this dashboard (Claude's terminal, an orphan from before a restart)
+function procs() {
+  let out = '';
+  try { out = execFileSync('ps', ['-axww', '-o', 'pid=,pgid=,command='], { encoding: 'utf8', maxBuffer: 8e6, env: { ...ENV, LC_ALL: 'en_US.UTF-8' } }); } catch {}
+  const own = job && !job.done ? job.proc.pid : -1;
+  const rows = out.split('\n').map((l) => l.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/)).filter(Boolean).map(([, pid, pgid, cmd]) => ({ pid: +pid, pgid: +pgid, cmd }));
+  const rclone = rows.filter((r) => /^(\S*\/)?rclone\s+(copy|copyto|sync|move|moveto|deletefile|delete|purge|dedupe)\b/.test(r.cmd) && !/--dedupe-mode list/.test(r.cmd) && r.pgid !== own);
+  const watchers = rows.filter((r) => /\b(grab|dlmap|dl|next)\.sh\b/.test(r.cmd) && /^(\/bin\/)?sh\s/.test(r.cmd));
+  return { rclone: rclone.map((r) => ({ pid: r.pid, cmd: r.cmd.replace(/^\S*rclone\s+/, '').slice(0, 160) })), watchers: watchers.map((r) => ({ pid: r.pid, cmd: r.cmd.replace(/^\S+\s+/, '').replace(HOME, '~').slice(0, 160) })) };
+}
+// broken downloads: empty files or half-finished browser downloads older than 10 minutes
+function badDownloads() {
+  const out = [];
+  let ents = []; try { ents = fs.readdirSync(DOWNLOADS, { withFileTypes: true }); } catch {}
+  for (const e of ents) {
+    if (!e.isFile() || e.name.startsWith('.')) continue;
+    const p = path.join(DOWNLOADS, e.name); const st = fs.statSync(p);
+    const partial = /\.(crdownload|download|part)$/i.test(e.name);
+    if ((st.size === 0 || partial) && Date.now() - st.mtimeMs > settings()['safe.badDownloadMinutes'] * 60e3) out.push({ name: e.name, size: st.size, mtime: st.mtimeMs });
+  }
+  return out;
+}
+// NotebookLM accounts and when each one hit its limit
+const DEFAULT_ACCOUNTS = [
+  { n: 0, email: 'sdyqs0437', note: 'صاحب الدرايف' }, { n: 1, email: 'essamsidek123' },
+  { n: 2, email: 'capital.science.faculty' }, { n: 3, email: 'ahmadsidek220' },
+];
+function accounts() {
+  let list; try { list = JSON.parse(fs.readFileSync(ACCOUNTS, 'utf8')); } catch { list = DEFAULT_ACCOUNTS; fs.writeFileSync(ACCOUNTS, JSON.stringify(list, null, 2)); }
+  return list.map((a) => {
+    const freeAt = a.limitedAt ? new Date(Date.parse(a.limitedAt) + settings()['acc.limitHours'] * 3600e3) : null;
+    return { ...a, limited: !!freeAt && freeAt > new Date(), freeAt: freeAt && freeAt > new Date() ? freeAt.toISOString() : null };
+  });
+}
+// a daily copy of the small state files (queue, plans, accounts, rules), last 14 days
+function backup() {
+  const dir = path.join(LOGS, 'backups', new Date().toISOString().slice(0, 10));
+  if (fs.existsSync(dir)) return;
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of fs.readdirSync(KIT)) if (/\.(json|tsv|txt|md)$/.test(f)) fs.copyFileSync(path.join(KIT, f), path.join(dir, f));
+  if (fs.existsSync(RULES.thawabit)) fs.copyFileSync(RULES.thawabit, path.join(dir, path.basename(RULES.thawabit)));
+  const old = fs.readdirSync(path.dirname(dir)).sort().slice(0, -settings()['safe.backupDays']);
+  for (const d of old) fs.renameSync(path.join(path.dirname(dir), d), path.join(HOME, '.Trash', `lectures-backup-${d}-${Date.now()}`));
+}
+try { backup(); } catch (e) { console.error('backup', e.message); }
+setInterval(() => { try { backup(); } catch {} }, 3600e3);
 const REMOTE_OF = (rel) => (rel ? `${REMOTE}/${rel}` : REMOTE);
 let job = null; // { id, action, lines[], done, code, clients:Set }
 
+let waiting = []; // commands asked for while another one runs; they start one after another
 function startJob(action, custom) {
-  if (job && !job.done) return { error: 'في عملية شغالة دلوقتي، استنى لما تخلص' };
+  if (job && !job.done) {
+    if (waiting.length >= settings()['safe.queueMax']) return { error: 'الطابور مليان، استنى شوية' };
+    if (!custom && (job.action === action || waiting.some((w) => w.action === action))) return { error: 'الأمر ده شغال أو مستني في الطابور بالفعل' };
+    const w = { id: randomUUID(), action, custom, label: (custom || ACTIONS[action] || {}).label, at: Date.now() };
+    if (!w.label) return { error: 'أمر مش معروف' };
+    waiting.push(w); return { queued: true, id: w.id, position: waiting.length };
+  }
   const a = custom || ACTIONS[action];
   if (!a) return { error: 'أمر مش معروف' };
-  job = { id: randomUUID(), action, label: a.label, lines: [], done: false, code: null, started: Date.now(), clients: new Set() };
+  if (WRITES.has(action) && settings()['safe.guardRclone']) {
+    const busy = procs().rclone;
+    if (busy.length) return { error: `فيه rclone شغال برا اللوحة (${busy.length})، استنى لما يخلص عشان الملفات متتكررش على الدرايف`, busy };
+  }
+  job = { id: randomUUID(), action, label: a.label, lines: [], done: false, code: null, started: Date.now(), clients: new Set(), fixes: 0 };
   const j = job;
-  const push = (line) => { j.lines.push(line); for (const c of j.clients) c.write(`data: ${JSON.stringify({ line })}\n\n`); };
-  const p = spawn(a.cmd[0], a.cmd[1], { env: ENV, detached: true });
-  j.proc = p;
-  const feed = (buf) => buf.toString().split('\n').map((l) => l.replace(/^\d{4}\/\d\d\/\d\d \d\d:\d\d:\d\d (NOTICE|INFO|ERROR|DEBUG)\s*:?\s*/, '').replace(/^:\s*/, '')).filter((l) => l.trim() && !/client_id|modification time|transaction limiter|Waiting for checks/.test(l)).forEach(push);
-  p.stdout.on('data', feed); p.stderr.on('data', feed);
-  p.on('error', (e) => push('خطأ: ' + e.message));
-  p.on('close', (code) => {
+  const push = (line) => { j.lines.push(line); if (j.lines.length > 2000) j.lines.splice(0, 500); for (const c of j.clients) c.write(`data: ${JSON.stringify({ line })}\n\n`); };
+  const finish = (code) => {
+    clearInterval(j.guard);
     j.done = true; j.code = j.cancelled ? 'cancelled' : code;
-    if (a.drive) setTimeout(() => driveIndex(true), 1500);
-    logAction({ type: 'job', action, label: a.label, code: j.code, secs: Math.round((Date.now() - j.started) / 1000), tail: j.lines.slice(-6) });
+    // the copy+check commands end with exit 0 even when the check finds files still missing on Drive
+    if (j.code === 0 && j.lines.some((l) => /\b[1-9]\d* differences found|file not in Google drive/.test(l))) j.code = 'missing';
+    if (a.drive || a.transfer) setTimeout(() => driveIndex(true), 1500);
+    logAction({ type: 'job', action, label: a.label, code: j.code, fixes: j.fixes, secs: Math.round((Date.now() - j.started) / 1000), tail: j.lines.slice(-6) });
     for (const c of j.clients) { c.write(`event: end\ndata: ${JSON.stringify({ code: j.code })}\n\n`); c.end(); }
-  });
+    // next waiting command (a cancelled job does not start the rest by surprise)
+    if (!j.cancelled) setTimeout(() => {
+      const w = waiting.shift(); if (!w) return;
+      const out = startJob(w.action, w.custom);
+      if (out.error) logAction({ type: 'job-skipped', action: w.action, label: w.label, why: out.error });
+    }, 2000);
+  };
+  const run = (mode) => {
+    const [bin, args] = typeof a.cmd === 'function' ? a.cmd(mode) : a.cmd;
+    const p = spawn(bin, args, { env: ENV, detached: true });
+    j.proc = p; j.mode = mode; j.slowSince = null;
+    const feed = (buf) => buf.toString().split('\n').map((l) => l.replace(/^\d{4}\/\d\d\/\d\d \d\d:\d\d:\d\d (NOTICE|INFO|ERROR|DEBUG)\s*:?\s*/, '').replace(/^:\s*/, '')).filter((l) => l.trim() && !/client_id|modification time|transaction limiter|Waiting for checks/.test(l)).forEach((l) => { watchSpeed(j, l); push(l); });
+    p.stdout.on('data', feed); p.stderr.on('data', feed);
+    p.on('error', (e) => push('خطأ: ' + e.message));
+    p.on('close', (code) => {
+      if (j.fixing) { j.fixing = false; const next = j.nextMode; setTimeout(async () => { if (j.cancelled) return finish('cancelled'); await j.beforeNext?.(); if (j.cancelled) return finish('cancelled'); run(next); }, 500); return; }
+      finish(code);
+    });
+  };
+  if (a.transfer) j.guard = setInterval(() => speedGuard(j, push), 15e3);
+  run('normal');
   return { id: j.id };
 }
+// ---------- speed guard: a transfer that stays very slow gets fixed step by step ----------
+// rclone's stats line looks like "12.3 MiB / 40 MiB, 30%, 45.6 KiB/s, ETA 10m"
+const UNIT = { B: 1 / 1024, KiB: 1, MiB: 1024, GiB: 1048576 };
+function watchSpeed(j, line) {
+  const m = line.match(/,\s*(\d+)%,\s*([\d.]+)\s*(B|KiB|MiB|GiB)\/s/);
+  if (m) {
+    const kbs = Number(m[2]) * UNIT[m[3]], pct = Number(m[1]); j.kbs = kbs;
+    if (pct >= 100 || kbs >= settings()['drive.slowKBs']) j.slowSince = null; else j.slowSince ||= Date.now();
+  } else if (/Copied|Updated|— فحص —/.test(line)) j.slowSince = null; // a finished file is progress
+}
+// what each fix does, in order; Morfi sees every step in the console
+const FIXES = [
+  ['normal', 'بعيد تشغيل الرفع من مكانه (rclone بيبدأ من جديد ومبيعيدش اللي خلص)'],
+  ['gentle', 'بهدّي الطلبات: ملف واحد في المرة وطلب واحد في الثانية، عشان Google ترجع تدينا سرعة'],
+  ['chunks', 'بكبّر حتة الرفع لـ 64MB عشان الملفات الكبيرة تمشي أسرع'],
+  ['cooldown', 'Google بتبطّأنا: هريّح شوية وأرجع أكمّل'],
+  ['gentle', 'آخر محاولة: هادي وبطيء بس مستمر'],
+];
+async function internetOk() { try { await fetch('https://www.google.com/generate_204', { signal: AbortSignal.timeout(6000) }); return true; } catch { return false; } }
+async function speedGuard(j, push) {
+  const S = settings();
+  if (!S['drive.speedGuard'] || j.done || j.fixing || !j.slowSince || Date.now() - j.slowSince < S['drive.slowMinutes'] * 60e3) return;
+  j.slowSince = null;
+  if (!(await internetOk())) {
+    push('⚠ النت نفسه واقع أو بطيء. مش هغيّر حاجة، هستنى النت يرجع والرفع هيكمّل لوحده.');
+    return;
+  }
+  if (j.fixes >= S['drive.maxFixes']) {
+    if (!j.toldSlow) { j.toldSlow = true; push('⚠ جرّبت كل الحلول والسرعة لسه واطية. الرفع شغال وهيكمّل، وبعتلك إشعار.'); notifyPhone('slow', 'الرفع بطيء قوي', `${j.label}: جرّبت ${j.fixes} حلول والسرعة لسه ${Math.round(j.kbs || 0)} KB/s`); }
+    return;
+  }
+  const [mode, text] = FIXES[Math.min(j.fixes, FIXES.length - 1)];
+  j.fixes++;
+  push(`⚡ السرعة وقعت (${Math.round(j.kbs || 0)} KB/s لمدة ${S['drive.slowMinutes']} دقايق). الحل ${j.fixes}: ${text}`);
+  logAction({ type: 'speed-fix', action: j.action, label: j.label, step: j.fixes, mode, kbs: Math.round(j.kbs || 0) });
+  j.nextMode = mode === 'cooldown' ? 'gentle' : mode;
+  j.beforeNext = mode === 'cooldown' ? () => new Promise((r) => setTimeout(r, S['drive.cooldownMinutes'] * 60e3)) : null;
+  j.fixing = true;
+  try { process.kill(-j.proc.pid, 'SIGTERM'); } catch { try { j.proc.kill('SIGTERM'); } catch {} }
+}
+// phone notification through ntfy (same topic and events as the worker)
+async function notifyPhone(event, title, body) {
+  const S = settings(), topic = S['notify.ntfy'];
+  if (!topic || !S['notify.events'].includes(event) || (S['notify.quiet'] || []).includes(new Date().getHours())) return;
+  try { await fetch(`https://ntfy.sh/${topic}`, { method: 'POST', headers: { 'X-Title': 'Lectures' }, body: `${title}: ${body}` }); } catch {}
+}
+
 // ---------- Drive mirror: what is on Drive vs on the Mac (cached, refreshed after Drive jobs) ----------
 let drive = { at: 0, files: null, dirs: {}, indexing: false };
 function driveIndex(force) {
-  if (drive.indexing || (!force && drive.files && Date.now() - drive.at < 300e3)) return drive;
+  if (drive.indexing || (!force && drive.files && Date.now() - drive.at < settings()['drive.cacheMinutes'] * 60e3)) return drive;
   drive.indexing = true;
   const p = spawn('rclone', ['lsjson', '-R', REMOTE, '--fast-list', '--no-mimetype'], { env: ENV });
   let out = '';
@@ -174,17 +325,20 @@ function syncState() {
   const ids = {}; if (drive.files) for (const [rel, f] of Object.entries(drive.files)) ids[rel] = f.id;
   return { at: drive.at, indexing: drive.indexing, ready: !!drive.files, error: drive.error, counts: { both, local: lists.local.length, drive: lists.drive.length, diff: lists.diff.length }, lists, status, ids, dirs: drive.dirs, auto: fs.existsSync(AUTOSYNC) };
 }
-// auto sync: every 10 minutes, push anything that exists only on the Mac (when switched on)
+// auto sync: every drive.autosyncMinutes, push anything that exists only on the Mac (when switched on)
+let lastAutosync = Date.now();
 setInterval(() => {
-  if (!fs.existsSync(AUTOSYNC) || (job && !job.done) || !drive.files) return;
+  if (Date.now() - lastAutosync < settings()['drive.autosyncMinutes'] * 60e3) return;
+  lastAutosync = Date.now();
+  if (!fs.existsSync(AUTOSYNC) || (job && !job.done) || !drive.files || procs().rclone.length) return;
   const s = syncState();
   if (s.counts.local || s.counts.diff) { logAction({ type: 'autosync', files: s.counts.local + s.counts.diff }); startJob('pushall'); }
-}, 600e3);
+}, 60e3);
 driveIndex(true);
 
 function cancelJob() {
   if (!job || job.done) return false;
-  job.cancelled = true;
+  job.cancelled = true; job.fixing = false;
   try { process.kill(-job.proc.pid, 'SIGTERM'); } catch { try { job.proc.kill('SIGTERM'); } catch {} }
   return true;
 }
@@ -246,8 +400,8 @@ const send = (res, code, obj) => { res.writeHead(code, { 'content-type': 'applic
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 
 function nextRun(now = new Date()) {
-  for (const h of SCHEDULE) { const d = new Date(now); d.setHours(h, 0, 0, 0); if (d > now) return d; }
-  const d = new Date(now); d.setDate(d.getDate() + 1); d.setHours(SCHEDULE[0], 0, 0, 0); return d;
+  for (const h of schedule()) { const d = new Date(now); d.setHours(h, 0, 0, 0); if (d > now) return d; }
+  const d = new Date(now); d.setDate(d.getDate() + 1); d.setHours(schedule()[0], 0, 0, 0); return d;
 }
 
 // ---------- server ----------
@@ -263,7 +417,7 @@ http.createServer(async (req, res) => {
       res.setHeader('vary', 'origin');
       if (req.method === 'OPTIONS') {
         res.writeHead(204, {
-          'access-control-allow-methods': 'GET, POST, PUT, DELETE',
+          'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE',
           'access-control-allow-headers': 'content-type',
           'access-control-allow-private-network': 'true',
           'access-control-max-age': '600',
@@ -286,17 +440,19 @@ http.createServer(async (req, res) => {
       const { rel, dir } = JSON.parse(await body(req));
       const p = safePath(rel); const relN = path.relative(ROOT, p);
       const name = relN.split(path.sep).pop() || 'كل الفولدرات';
-      const cmd = dir === 'down'
-        ? ['rclone', ['copy', REMOTE_OF(relN), p, '--ignore-existing', '--exclude', '.DS_Store', '-v']]
-        : ['rclone', ['copy', p, REMOTE_OF(relN), '--exclude', '.DS_Store', '--tpslimit', '2', '--retries', '10', '-v']];
-      const out = startJob(dir === 'down' ? 'down' : 'up', { label: (dir === 'down' ? 'تنزيل ' : 'رفع ') + name, drive: true, cmd });
+      const STATS = ['-v', '--stats-one-line', '--stats', '15s'];
+      const cmd = (mode) => dir === 'down'
+        ? ['rclone', ['copy', REMOTE_OF(relN), p, '--ignore-existing', ...excludes(), ...tune([], mode), ...STATS]]
+        : ['rclone', ['copy', p, REMOTE_OF(relN), ...tune(upFlags(), mode), ...chunk(mode), ...STATS]];
+      const out = startJob(dir === 'down' ? 'down' : 'up', { label: (dir === 'down' ? 'تنزيل ' : 'رفع ') + name, drive: true, transfer: true, cmd });
       return send(res, out.error ? 409 : 200, out);
     }
     if (r === '/api/sync/file' && req.method === 'POST') {
       const { rel, dir } = JSON.parse(await body(req));
       const p = safePath(rel); const relN = path.relative(ROOT, p);
-      const cmd = dir === 'down' ? ['rclone', ['copyto', REMOTE_OF(relN), p, '-v']] : ['rclone', ['copyto', p, REMOTE_OF(relN), '--tpslimit', '2', '--retries', '10', '-v']];
-      const out = startJob(dir === 'down' ? 'down' : 'up', { label: (dir === 'down' ? 'تنزيل ' : 'رفع ') + path.basename(relN), drive: true, cmd });
+      const STATS = ['-v', '--stats-one-line', '--stats', '15s'];
+      const cmd = (mode) => dir === 'down' ? ['rclone', ['copyto', REMOTE_OF(relN), p, ...tune([], mode), ...STATS]] : ['rclone', ['copyto', p, REMOTE_OF(relN), ...tune(upFlags(), mode), ...chunk(mode), ...STATS]];
+      const out = startJob(dir === 'down' ? 'down' : 'up', { label: (dir === 'down' ? 'تنزيل ' : 'رفع ') + path.basename(relN), drive: true, transfer: true, cmd });
       return send(res, out.error ? 409 : 200, out);
     }
     if (r === '/api/autosync' && req.method === 'POST') {
@@ -305,13 +461,66 @@ http.createServer(async (req, res) => {
       logAction({ type: 'autosync-set', on: !!on }); return send(res, 200, { on: !!on });
     }
     if (r === '/api/health') return send(res, 200, checkHealth(u.searchParams.has('force')));
+    if (r === '/api/status') return send(res, 200, { ...procs(), downloads: badDownloads() });
+    if (r === '/api/downloads/trash' && req.method === 'POST') {
+      // only the broken downloads found above, moved to the Trash (never deleted)
+      const bad = badDownloads(); if (!bad.length) return send(res, 200, { moved: 0 });
+      const dir = path.join(HOME, '.Trash', `bad-downloads-${new Date().toISOString().slice(0, 10)}`); fs.mkdirSync(dir, { recursive: true });
+      for (const f of bad) fs.renameSync(path.join(DOWNLOADS, f.name), path.join(dir, fs.existsSync(path.join(dir, f.name)) ? `${Date.now()}-${f.name}` : f.name));
+      logAction({ type: 'downloads-trash', files: bad.length }); return send(res, 200, { moved: bad.length });
+    }
+    if (r === '/api/worker' && req.method === 'GET') {
+      const st = jread(WSTATUS, {}); const alive = Date.now() - Date.parse(st.at || 0) < 120e3 || st.state === 'working';
+      return send(res, 200, { status: st, alive, tasks: jread(WTASKS, []).slice(-30).reverse() });
+    }
+    if (r === '/api/worker/make' && req.method === 'POST') {
+      const { rel, outs } = JSON.parse(await body(req)); safePath(rel);
+      const list = (outs || []).filter((o) => OUTS.includes(o)); if (!list.length) return send(res, 400, { error: 'اختار حاجة واحدة على الأقل' });
+      const all = jread(WTASKS, []);
+      if (all.some((t) => t.rel === rel && ['waiting', 'working'].includes(t.status))) return send(res, 409, { error: 'المحاضرة دي في الطابور بالفعل' });
+      all.push({ id: randomUUID(), rel, outs: list, from: 'dashboard', status: 'waiting', at: new Date().toISOString() }); jwrite(WTASKS, all);
+      logAction({ type: 'make', rel, outs: list }); return send(res, 200, { ok: true });
+    }
+    if (r.startsWith('/api/worker/task/') && req.method === 'POST') {
+      const [, , , , id, act] = r.split('/'); const all = jread(WTASKS, []); const t = all.find((x) => x.id === id);
+      if (!t) return send(res, 404, { error: 'مش موجود' });
+      if (act === 'retry' && ['failed', 'later', 'done'].includes(t.status)) { t.status = 'waiting'; t.error = null; }
+      else if (act === 'cancel' && ['waiting', 'later'].includes(t.status)) t.status = 'cancelled';
+      else return send(res, 409, { error: 'مينفعش دلوقتي' });
+      jwrite(WTASKS, all); return send(res, 200, { ok: true });
+    }
+    if (r === '/api/worker/run' && req.method === 'POST') { fs.writeFileSync(path.join(WORKER, 'RUN'), new Date().toISOString()); logAction({ type: 'worker-run' }); return send(res, 200, { ok: true }); }
+    if (r === '/api/worker/zen' && req.method === 'POST') {
+      // restarts Morfi's Zen with the worker's port; Zen brings its tabs back
+      spawn('node', [path.join(WORKER, 'worker.mjs'), 'zen'], { env: ENV, detached: true, stdio: 'ignore' }).unref();
+      return send(res, 200, { ok: true });
+    }
+    if (r === '/api/settings' && req.method === 'GET') return send(res, 200, { groups: GROUPS, schema: SCHEMA, values: settings() });
+    if (r === '/api/settings' && req.method === 'POST') {
+      // {values:{key:value}} saves, {reset:[keys]} goes back to defaults, {replace:true, values} is an import
+      const inp = JSON.parse(await body(req));
+      try { const v = saveSettings(inp); logAction({ type: 'settings', keys: [...Object.keys(inp.values || {}), ...(inp.reset || [])].slice(0, 20) }); return send(res, 200, { values: v }); }
+      catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    if (r === '/api/accounts' && req.method === 'GET') return send(res, 200, accounts());
+    if (r === '/api/accounts' && req.method === 'POST') {
+      const inp = JSON.parse(await body(req)), { n, limited, disabled } = inp;
+      const list = accounts().map(({ limited: _l, freeAt: _f, ...a }) => a);
+      const a = list.find((x) => x.n === Number(n)); if (!a) return send(res, 404, { error: 'أكونت مش معروف' });
+      if ('limited' in inp) a.limitedAt = limited ? new Date().toISOString() : null;
+      if ('disabled' in inp) { if (disabled) a.disabled = true; else delete a.disabled; }
+      fs.writeFileSync(ACCOUNTS, JSON.stringify(list, null, 2));
+      logAction('disabled' in inp ? { type: 'account-onoff', n: a.n, email: a.email, on: !disabled } : { type: 'account', n: a.n, email: a.email, limited: !!limited }); return send(res, 200, accounts());
+    }
     if (r === '/api/job/cancel' && req.method === 'POST') return send(res, 200, { cancelled: cancelJob() });
+    if (r.startsWith('/api/waiting/') && req.method === 'DELETE') { const id = r.split('/').pop(); waiting = waiting.filter((w) => w.id !== id); return send(res, 200, { ok: true }); }
     if (r === '/api/state') {
       const s = scan();
       return send(res, 200, {
-        ...s, paused: fs.existsSync(PAUSED), schedule: SCHEDULE, nextRun: nextRun().toISOString(), now: new Date().toISOString(),
+        ...s, paused: fs.existsSync(PAUSED), schedule: schedule(), nextRun: nextRun().toISOString(), now: new Date().toISOString(),
         runs: readJSONL(path.join(LOGS, 'runs.jsonl'), 20), actions: readJSONL(path.join(LOGS, 'actions.jsonl'), 30),
         queue: readQueue(), categories: [...cats()],
+        waiting: waiting.map(({ id, action, label, at }) => ({ id, action, label, at })),
         job: job && { id: job.id, action: job.action, label: job.label, done: job.done, code: job.code, lines: job.lines.slice(-200) },
       });
     }
@@ -351,6 +560,15 @@ http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': MIME[ext], 'content-length': fs.statSync(p).size });
       return fs.createReadStream(p).pipe(res);
     }
+    if (r.startsWith('/api/rules/') && r.endsWith('/versions')) {
+      // older copies of a rules file: the .bak made before every save + the daily backups
+      const f = RULES[r.split('/')[3]]; if (!f) return send(res, 404, { error: 'مش معروف' });
+      const name = path.basename(f), out = [];
+      for (const b of fs.readdirSync(LOGS)) if (b.startsWith(name + '.') && b.endsWith('.bak')) out.push({ id: b, at: Number(b.slice(name.length + 1, -4)) });
+      const BK = path.join(LOGS, 'backups'); if (fs.existsSync(BK)) for (const d of fs.readdirSync(BK)) if (fs.existsSync(path.join(BK, d, name))) out.push({ id: `backups/${d}/${name}`, at: Date.parse(d) });
+      if (u.searchParams.get('id')) { const v = out.find((x) => x.id === u.searchParams.get('id')); if (!v) return send(res, 404, { error: 'مش موجود' }); return send(res, 200, { text: fs.readFileSync(path.join(LOGS, v.id), 'utf8') }); }
+      return send(res, 200, out.sort((a, b) => b.at - a.at).slice(0, 30));
+    }
     if (r.startsWith('/api/rules/')) {
       const f = RULES[r.split('/').pop()];
       if (!f) return send(res, 404, { error: 'مش معروف' });
@@ -384,6 +602,13 @@ http.createServer(async (req, res) => {
       q.push({ id: randomUUID(), rel, note: String(note || '').slice(0, 500), at: new Date().toISOString(), status: 'waiting' });
       writeQueue(q); logAction({ type: 'queue', rel });
       return send(res, 200, { ok: true });
+    }
+    if (r.startsWith('/api/queue/') && req.method === 'PATCH') {
+      const id = r.split('/').pop(); const { top, note } = JSON.parse(await body(req));
+      const q = readQueue(); const i = q.findIndex((x) => x.id === id); if (i < 0) return send(res, 404, { error: 'مش موجود' });
+      if (note !== undefined) q[i].note = String(note).slice(0, 500);
+      if (top) q.unshift(...q.splice(i, 1));
+      writeQueue(q); return send(res, 200, { ok: true });
     }
     if (r.startsWith('/api/queue/') && req.method === 'DELETE') {
       const id = r.split('/').pop();

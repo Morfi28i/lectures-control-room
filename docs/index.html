@@ -42,6 +42,7 @@
       <li><a href="#/activity" data-route="activity"><svg viewBox="0 0 24 24"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9z"/></svg><span>السجل</span></a></li>
       <li><a href="#/rules" data-route="rules"><svg viewBox="0 0 24 24"><path d="M7 4h10v16H7zM10 8h4M10 12h4M10 16h2"/></svg><span>الثوابت</span></a></li>
       <li><a href="#/settings" data-route="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><span>الإعدادات</span></a></li>
+      <li><a href="#/custom" data-route="custom"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>التخصيص</span></a></li>
     </ul>
     <button class="palbtn" id="palBtn"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4-4"/></svg><span>بحث وأوامر</span><kbd>⌘K</kbd></button>
     <div class="side-foot">
@@ -91,10 +92,10 @@
             <div class="playhead" id="playhead"><span id="nowLabel"></span></div>
           </div>
           <div class="lanes" aria-hidden="true">
-            <div class="lane"><b>ترجمة</b><div class="lane-track" style="--c:var(--tr)"></div></div>
-            <div class="lane"><b>خريطة</b><div class="lane-track" style="--c:var(--mm)"></div></div>
             <div class="lane"><b>سلايدز</b><div class="lane-track" style="--c:var(--sl)"></div></div>
             <div class="lane"><b>عربي</b><div class="lane-track" style="--c:var(--ar)"></div></div>
+            <div class="lane"><b>English</b><div class="lane-track" style="--c:var(--en)"></div></div>
+            <div class="lane"><b>للمقدم</b><div class="lane-track" style="--c:var(--pr)"></div></div>
           </div>
         </div>
 
@@ -135,6 +136,17 @@
             <div class="row-actions"><span class="state" id="jobState">مستني أمر</span><button class="btn ghost small" id="cancelJob" hidden>وقّف</button></div>
           </div>
           <pre id="log" aria-live="polite"></pre>
+          <ul class="wait-list" id="waitList" hidden></ul>
+        </div>
+
+        <div class="card worker-card" id="workerCard">
+          <div class="row-head">
+            <h2>العامل</h2>
+            <div class="row-actions"><span class="state" id="wState">…</span><button class="btn small" id="wRun" data-tip="يسحب الجديد ويعمل كل الناقص ويرفعه دلوقتي">اشتغل دلوقتي</button></div>
+          </div>
+          <p class="muted small" id="wStep"></p>
+          <div class="warn" id="wSignin" hidden><b>العامل مستني Zen</b><p>العامل بيشتغل من Zen بتاعك، بس Zen لازم يتفتح بإعداد العامل. الزرار هيقفل Zen ويفتحه تاني، والتابات بترجع زي ما هي.</p><button class="btn small" id="wSigninBtn">افتح Zen من جديد للعامل</button></div>
+          <ol class="task-list" id="wTasks"></ol>
         </div>
       </section>
 
@@ -258,7 +270,28 @@
             <span class="muted" id="rulesInfo"></span>
           </div>
           <textarea id="rulesText" spellcheck="false" aria-label="نص القواعد"></textarea>
-          <div class="row-foot"><button class="btn" id="saveRules">احفظ التعديل</button></div>
+          <div class="row-foot"><select id="rulesVer" aria-label="نسخة قديمة"><option value="">رجّع نسخة قديمة…</option></select><button class="btn" id="saveRules">احفظ التعديل</button></div>
+        </div>
+      </section>
+
+      <!-- ============ CUSTOMIZE: drawn from settings.mjs ============ -->
+      <section class="page" data-page="custom" hidden>
+        <div class="card cz-head">
+          <div><h2>خصّص كل حاجة</h2><p class="muted">كل إعداد هنا بيتحفظ لوحده أول ما تغيّره، والعامل والسيرفر بياخدوه على طول. اللي بتغيّره بيظهر عليه علامة، و«↺» بترجّعه للأصلي.</p></div>
+          <div class="cz-tools">
+            <input type="search" id="czQ" placeholder="دوّر على إعداد…" aria-label="دوّر على إعداد">
+            <label class="chip"><input type="checkbox" id="czChanged"> المتغيّر بس</label>
+            <button class="btn ghost small" id="czExport">نزّل نسخة</button>
+            <label class="btn ghost small" for="czImport">ارفع نسخة</label><input type="file" id="czImport" accept="application/json" hidden>
+            <button class="btn ghost small" id="czResetAll">رجّع كله للأصلي</button>
+          </div>
+          <nav class="cz-jump" id="czJump" aria-label="أقسام التخصيص"></nav>
+        </div>
+        <div id="czGroups"></div>
+        <div class="card">
+          <h2>الأكونتات</h2>
+          <p class="muted">شغّل أو اقفل أي أكونت، والعامل هيستخدم المتاح بس.</p>
+          <ul class="acct-list" id="czAccts"></ul>
         </div>
       </section>
 
@@ -267,19 +300,24 @@
         <div class="split">
           <div class="card">
             <h2>الطيار الآلي</h2>
-            <p class="muted">بيشتغل ٣ مرات في اليوم: ٩ الصبح، و٣ العصر، و٩ بالليل. بيسحب الجديد، يعمل كل الملفات، يكمّل أجزاء الكتب، ويرفع.</p>
+            <p class="muted">العامل بيشتغل لوحده في المواعيد دي: بيسحب الجديد، يعمل السلايدز في NotebookLM، ينزّلها ويحطها مكانها، ويرفعها. ومن غير Claude.</p>
+            <div class="setting"><span>المواعيد (ساعة من ٠ لـ ٢٣)</span><span class="row-actions"><input class="hours" id="wHours" inputmode="numeric" aria-label="مواعيد العامل" placeholder="9, 15, 21"><button class="btn ghost small" id="wHoursSave">احفظ</button></span></div>
+            <div class="setting"><span>يعمل الناقص لوحده في المواعيد</span><label class="pilot small-switch"><input type="checkbox" id="wAuto" role="switch"><span class="knob" aria-hidden="true"></span></label></div>
+            <div class="setting"><span>Zen جاهز للعامل</span><button class="btn ghost small" id="wSignin2" data-tip="بيقفل Zen ويفتحه تاني بإعداد العامل، والتابات بترجع">افتح Zen من جديد</button></div>
+            <div class="setting"><span>إشعارات على الموبايل (ntfy)</span><span class="row-actions"><b id="wNtfy">مقفولة</b><button class="btn ghost small" id="wNtfyBtn">شغّلها</button></span></div>
             <div class="setting"><span>الحالة</span><b id="sPilot">…</b></div>
             <div class="setting"><span>الدورة الجاية</span><b id="sNext">…</b></div>
             <div class="setting"><span>شغّل الخطوات دلوقتي</span><button class="btn small" data-run="runnow" data-tip="يسحب الجديد من الدرايف، يرتّبه، ويرفع أي حاجة ناقصة">شغّل دلوقتي</button></div>
-            <div class="setting gem"><span>اعمل الملفات في Gemini</span>
-              <div class="gem-accts">
+            <div class="setting gem"><span>أكونتات NotebookLM</span>
+              <div class="gem-accts" id="gemAccts">
                 <a class="gem-btn" href="https://notebook.google.com/?authuser=0" target="_blank" rel="noopener" data-tip="sdyqs0437 (صاحب الدرايف)"><span class="gem-star"></span>١</a>
-                <a class="gem-btn" href="https://notebook.google.com/?authuser=1" target="_blank" rel="noopener" data-tip="capital.science.faculty"><span class="gem-star"></span>٢</a>
-                <a class="gem-btn" href="https://notebook.google.com/?authuser=2" target="_blank" rel="noopener" data-tip="essamsidek123"><span class="gem-star"></span>٣</a>
+                <a class="gem-btn" href="https://notebook.google.com/?authuser=1" target="_blank" rel="noopener" data-tip="essamsidek123"><span class="gem-star"></span>٢</a>
+                <a class="gem-btn" href="https://notebook.google.com/?authuser=2" target="_blank" rel="noopener" data-tip="capital.science.faculty"><span class="gem-star"></span>٣</a>
                 <a class="gem-btn" href="https://notebook.google.com/?authuser=3" target="_blank" rel="noopener" data-tip="ahmadsidek220"><span class="gem-star"></span>٤</a>
               </div>
             </div>
-            <p class="muted small">الترجمة والخرايط والسلايدز بتتعمل في Gemini Notebook، والطيار الآلي بيعملها لوحده ٣ مرات في اليوم. عايز دورة كاملة دلوقتي؟ <button class="linkbtn" id="openClaude">افتح Claude</button> ← Scheduled ← Run now.</p>
+            <ul class="acct-list" id="acctList"></ul>
+            <p class="muted small">كل أكونت بيعمل حوالي ٧ سلايدز كل ٥ ساعات. لما الحد يخلص علّمه هنا (أو Claude بيعلّمه لوحده)، وهيرجع متاح لوحده بعد ٥ ساعات. عايز دورة كاملة دلوقتي؟ <button class="linkbtn" id="openClaude">افتح Claude</button> ← Scheduled ← Run now.</p>
           </div>
           <div class="card">
             <h2>الاتصال بالدرايف</h2>
@@ -291,6 +329,15 @@
             </div>
             <div class="row-foot"><button class="btn ghost small" id="recheck">افحص تاني</button></div>
           </div>
+        </div>
+        <div class="card">
+          <h2>حالة الأوتوميشن</h2>
+          <p class="muted">اللي شغال دلوقتي برا اللوحة، والتنزيلات اللي باظت. أي أمر بيكتب على الدرايف بيستنى لو فيه rclone تاني شغال، عشان الملفات متتكررش.</p>
+          <div class="setting"><span>rclone شغال برا اللوحة</span><b id="stRclone">…</b></div>
+          <div class="setting"><span>مراقبين التنزيل (grab / dlmap)</span><b id="stWatch">…</b></div>
+          <div class="setting"><span>تنزيلات بايظة في Downloads</span><span class="row-actions"><b id="stBad">…</b><button class="btn ghost small" id="trashBad" hidden data-tip="بتروح الـ Trash، مش بتتمسح">ودّيهم الـ Trash</button></span></div>
+          <div class="setting"><span>ملفات مكررة على الدرايف</span><button class="btn ghost small" data-run="dupes" data-tip="بيدوّر بس ومبيغيرش حاجة. النتيجة في الشاشة في الرئيسية">دوّر دلوقتي</button></div>
+          <ul class="proc-list" id="procList"></ul>
         </div>
         <div class="split">
           <div class="card">
@@ -305,6 +352,7 @@
                 <button class="swatch" data-base="plum" title="بنفسجي" style="--sw-a:#17123a;--sw-b:#2e2563"></button>
               </div>
             </div>
+            <div class="setting"><span>وضع هادي (حركة أقل)</span><label class="pilot small-switch"><input type="checkbox" id="calm" role="switch"><span class="knob" aria-hidden="true"></span></label></div>
             <div class="setting"><span>إشعارات على الماك</span><button class="btn ghost small" id="notifyBtn">شغّل الإشعارات</button></div>
             <div class="setting"><span>تقرير بالناقص</span><button class="btn ghost small" id="exportBtn">نزّل ملف Excel (CSV)</button></div>
             <div class="setting"><span>فولدر المحاضرات</span><button class="btn ghost small" id="openRoot">افتحه</button></div>
@@ -332,8 +380,18 @@
   <div class="d-keys" id="dKeys"></div>
   <h3>الملفات</h3>
   <ul class="d-files" id="dFiles"></ul>
+  <div class="d-make">
+    <h3>اعمل دلوقتي (العامل بيعملها لوحده)</h3>
+    <div class="make-opts" id="dMake">
+      <label><input type="checkbox" value="SRC"><span>سلايدز بلغة الملف</span></label>
+      <label><input type="checkbox" value="AR"><span>سلايدز عربي</span></label>
+      <label><input type="checkbox" value="EN"><span>سلايدز English</span></label>
+      <label><input type="checkbox" value="PR"><span>سلايدز للمقدم</span></label>
+    </div>
+    <button class="btn" id="dMakeGo">ابدأ</button>
+  </div>
   <div class="d-ask">
-    <h3>اطلب من الطيار الآلي</h3>
+    <h3>أو اكتب طلب لـ Claude</h3>
     <textarea id="dNote" rows="2" placeholder="مثلاً: اعمل السلايدز العربي، أو اعمل presenter عشان دي آخر محاضرة"></textarea>
     <button class="btn" id="dQueue">ضيفها للطلبات</button>
   </div>

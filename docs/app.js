@@ -2,19 +2,26 @@
 const API = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? '' : 'http://localhost:4545';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const KEYS = [
-  ['sl', 'سلايدز'], ['tr', 'ترجمة'], ['mm', 'خريطة ذهنية'], ['ar', 'سلايدز عربي'], ['pr', 'سلايدز للمقدم'], ['en', 'سلايدز English'],
+// translation and mind map are no longer made (2026-11-03): they stay only as history in the donut
+const ALL_KEYS = [
+  ['sl', 'سلايدز'], ['ar', 'سلايدز عربي'], ['pr', 'سلايدز للمقدم'], ['en', 'سلايدز English'], ['tr', 'ترجمة (قديم)'], ['mm', 'خريطة ذهنية (قديم)'],
 ];
-const KEY_NAME = Object.fromEntries(KEYS);
-const ACTION_NAME = { pull: 'سحب وترتيب', push: 'رفع unsorted', check: 'فحص unsorted', checkall: 'فحص كل المحاضرات', runnow: 'تشغيل الخطوات', pushall: 'رفع كل الجديد', pullall: 'تنزيل من الدرايف', up: 'رفع', down: 'تنزيل' };
-const PAGES = { home: 'الرئيسية', subjects: 'المواد', books: 'الكتب', inbox: 'الوارد', sync: 'المزامنة', activity: 'السجل', rules: 'الثوابت', settings: 'الإعدادات' };
-const ar = new Intl.NumberFormat('ar-EG');
-const time = new Intl.DateTimeFormat('ar-EG', { hour: 'numeric', minute: '2-digit' });
-const dayTime = new Intl.DateTimeFormat('ar-EG', { weekday: 'long', hour: 'numeric', minute: '2-digit' });
+const KEYS = ALL_KEYS.slice(0, 4);
+const KEY_NAME = Object.fromEntries(ALL_KEYS);
+const ACTION_NAME = { pull: 'سحب وترتيب', push: 'رفع unsorted', check: 'فحص unsorted', checkall: 'فحص كل المحاضرات', runnow: 'تشغيل الخطوات', pushall: 'رفع كل الجديد', pullall: 'تنزيل من الدرايف', dupes: 'دوّر على المكرر', finish: 'نقل اللي خلص', up: 'رفع', down: 'تنزيل' };
+const PAGES = { home: 'الرئيسية', subjects: 'المواد', books: 'الكتب', inbox: 'الوارد', sync: 'المزامنة', activity: 'السجل', rules: 'الثوابت', settings: 'الإعدادات', custom: 'التخصيص' };
+// number and time formats follow the «التصرف» settings (digits, 12/24 h); rebuilt by applySettings()
+let ar = new Intl.NumberFormat('ar-EG');
+let time = new Intl.DateTimeFormat('ar-EG', { hour: 'numeric', minute: '2-digit' });
+let dayTime = new Intl.DateTimeFormat('ar-EG', { weekday: 'long', hour: 'numeric', minute: '2-digit' });
+let SET = {}; // the settings values (settings.mjs) for this page
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+// calm mode (Settings) works like the system's reduce-motion setting
+const calm = (() => { try { return localStorage.getItem('calm') === '1'; } catch { return false; } })();
+document.documentElement.classList.toggle('calm', calm);
+const reduced = calm || matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-let SY = null, syncList = 'local', retry = 5e3, histFilter = 'all', S = null, BOOKS = [], route = 'home', filter = 'all', query = '', current = null, rulesKey = 'thawabit', rulesDirty = false, streaming = false;
+let WK = null, SY = null, syncList = 'local', retry = 5e3, histFilter = 'all', S = null, BOOKS = [], route = 'home', filter = 'all', query = '', current = null, rulesKey = 'thawabit', rulesDirty = false, streaming = false;
 
 async function api(url, opts = {}) {
   const r = await fetch(API + url, { headers: { 'content-type': 'application/json' }, ...opts });
@@ -63,7 +70,7 @@ addEventListener('hashchange', go);
 // ---------- state ----------
 async function load() {
   try {
-    [S, BOOKS, SY] = await Promise.all([api('/api/state'), api('/api/books'), api('/api/sync')]);
+    [S, BOOKS, SY, WK] = await Promise.all([api('/api/state'), api('/api/books'), api('/api/sync'), api('/api/worker').catch(() => null)]);
   } catch {
     clearTimeout(load.retryT); load.retryT = setTimeout(load, retry); retry = Math.min(retry * 2, 60e3);
     document.body.classList.add('offline'); document.body.classList.remove('loading');
@@ -82,14 +89,17 @@ async function load() {
   const pend = S.items.filter((i) => i.inUnsorted && i.missing.length).length;
   $('#inboxBadge').hidden = !pend; $('#inboxBadge').textContent = ar.format(pend);
   if (S.job && !S.job.done && !streaming) attach(S.job.action);
+  const W = S.waiting || [];
+  $('#waitList').hidden = !W.length;
+  $('#waitList').innerHTML = W.map((w, n) => `<li style="--i:${n}"><span>${ar.format(n + 1)}. ${esc(w.label)}</span><button class="x" data-wait="${w.id}" aria-label="شيله من الطابور">×</button></li>`).join('');
   // only redraw when something changed, so bars and rings do not replay every refresh
-  syncBadge();
+  syncBadge(); renderWorker();
   const sig = JSON.stringify([S.items, S.pdfs, S.paused, S.runs, S.actions, S.queue, BOOKS, SY.at, SY.indexing, SY.counts, SY.auto]);
   if (sig !== load.sig) { load.sig = sig; renderPage(); }
 }
 function renderPage() {
   if (!S) return;
-  ({ home: renderHome, subjects: renderSubjects, books: renderBooks, inbox: renderInbox, sync: renderSync, activity: renderHistory, rules: () => {}, settings: renderSettings })[route]();
+  ({ home: renderHome, subjects: renderSubjects, books: renderBooks, inbox: renderInbox, sync: renderSync, activity: renderHistory, rules: () => {}, settings: renderSettings, custom: renderCustom })[route]();
 }
 
 // ---------- home ----------
@@ -106,10 +116,11 @@ function renderHome() {
     // the playhead scrubs from midnight to now when the app opens
     requestAnimationFrame(() => requestAnimationFrame(tick));
   }
-  const last = S.runs[0];
+  const last = S.runs[0], stale = !S.paused && (!last || Date.now() - Date.parse(last.at) > (SET['safe.staleHours'] || 12) * 3600e3);
+  $('#lastRun').classList.toggle('stale', stale);
   $('#lastRun').innerHTML = last
-    ? `<strong>آخر دورة: ${dayTime.format(new Date(last.at))}</strong><br>${esc(last.summary || '')}`
-    : '<strong>لسه مفيش دورة اتسجلت</strong><br>أول دورة هتظهر هنا بعد ما تشتغل.';
+    ? `<strong>آخر دورة: ${dayTime.format(new Date(last.at))}</strong><br>${esc(last.summary || '')}${stale ? '<br><em>الطيار الآلي مشتغلش من أكتر من ١٢ ساعة. اتأكد إن الماك صاحي وClaude مفتوح.</em>' : ''}`
+    : '<strong>لسه مفيش دورة اتسجلت</strong><br>أول دورة هتظهر هنا بعد ما تشتغل. لو عدّى ميعاد ومظهرتش، اتأكد إن الماك صاحي وClaude مفتوح.';
   const lects = S.items.filter((i) => i.lecture && !i.inUnsorted);
   const done = lects.filter((i) => !i.missing.length).length;
   const bNeed = BOOKS.reduce((n, b) => n + b.need, 0), bDone = BOOKS.reduce((n, b) => n + b.done, 0);
@@ -171,7 +182,8 @@ function renderSubjects() {
           </button>`).join('')}</div></div>`;
     }).join('');
   const L = S.items.filter((i) => i.lecture && !i.inUnsorted);
-  const rows = ['sl', 'tr', 'mm', 'ar'].map((k) => { const pool = L.filter((i) => i.need.includes(k)); return [k, pool.filter((i) => i.outputs[k]).length, pool.length]; });
+  // translation and mind map are no longer made (2026-11-03)
+  const rows = ['sl', 'ar'].map((k) => { const pool = L.filter((i) => i.need.includes(k)); return [k, pool.filter((i) => i.outputs[k]).length, pool.length]; });
   const subjects = [...new Set(L.map((i) => i.subject))];
   rows.push(['pr', subjects.filter((s) => L.some((i) => i.subject === s && i.outputs.pr)).length, subjects.length, 'مادة']);
   $('#meters').innerHTML = rows.map(([k, a, b, unit]) => `
@@ -196,6 +208,8 @@ function openDrawer(i) {
   const driveOnly = SY?.lists.drive.filter((r) => r.startsWith(i.rel + '/') && !r.slice(i.rel.length + 1).includes('/')).map((r) => r.split('/').pop()) || [];
   $('#dFiles').innerHTML = [...files, ...driveOnly.filter((n) => !files.includes(n))].map((n) => { const st = SY?.status[i.rel + '/' + n]; return `<li><span>${statusChip(st)}${esc(n)}</span><span>${st === 'drive' ? `<button data-pull="${esc(n)}">نزّله</button>` : `${/\.pdf$/i.test(n) ? `<button data-view="${esc(n)}">اعرض</button> ` : ''}<button data-open="${esc(n)}">افتح</button>${st === 'local' || st === 'diff' ? ` <button data-push="${esc(n)}">ارفعه</button>` : ''}`}</span></li>`; }).join('');
   const did = SY?.dirs[i.rel]; $('#dDrive').hidden = !did; if (did) $('#dDrive').href = `https://drive.google.com/drive/folders/${did}`;
+  $$('#dMake input').forEach((c) => { c.checked = i.missing.some((k) => (k === 'sl' && c.value === 'SRC') || (k === 'ar' && c.value === 'AR')); c.closest('label').hidden = (c.value === 'AR' && i.lang === 'ar') || (c.value === 'EN' && i.lang !== 'ar'); });
+  $('#dMakeGo').hidden = !i.lecture;
   $('#dNote').value = i.missing.length ? 'كمّل: ' + i.missing.map((k) => KEY_NAME[k]).join('، ') : '';
   $('#drawer').showModal();
 }
@@ -254,17 +268,20 @@ function renderInbox() {
   const sel = $('#dest');
   if (!sel.options.length) {
     const opts = ['Not summarized', ...S.categories.filter((c) => !/(^|\/)Book$/.test(c))];
+    sel.onchange = () => { try { localStorage.setItem('dest', sel.value); } catch {} };
     sel.innerHTML = opts.map((c) => `<option value="${esc(c)}">${c === 'Not summarized' ? 'مش عارف المادة (هيتحدد لوحده)' : esc(c.replace(/ \//g, ' / '))}</option>`).join('');
+    try { const d = localStorage.getItem('dest'); if (d && [...sel.options].some((o) => o.value === d)) sel.value = d; } catch {}
   }
   const pend = S.items.filter((i) => i.inUnsorted);
   $('#pending').innerHTML = pend.length
     ? pend.map((i) => `<li><div><b>${esc(i.name)}</b><small>${esc(i.subject)} · ${i.missing.length ? 'ناقص: ' + i.missing.map((k) => KEY_NAME[k]).join('، ') : 'جاهز'}</small></div></li>`).join('')
     : '<li class="muted">unsorted فاضي. ارمي ملف فوق وهيظهر هنا.</li>';
   $('#queue').innerHTML = S.queue.length
-    ? S.queue.map((q) => `<li><div><b>${esc(q.rel.split('/').pop())}</b><small>${esc(q.note || 'كمّل الناقص')}</small></div><button class="x" data-del="${q.id}" aria-label="شيل الطلب">×</button></li>`).join('')
+    ? S.queue.map((q, n) => `<li><div><b>${esc(q.rel.split('/').pop())}</b><small>${esc(q.note || 'كمّل الناقص')}</small></div><span class="row-actions">${n ? `<button class="x" data-top="${q.id}" aria-label="خليه الأول" data-tip="خليه أول طلب">↑</button>` : ''}<button class="x" data-del="${q.id}" aria-label="شيل الطلب">×</button></span></li>`).join('')
     : '<li class="muted">مفيش طلبات. افتح أي محاضرة من «المواد» واطلب تكملتها.</li>';
 }
 $('#queue').addEventListener('click', async (e) => {
+  if (e.target.dataset.top) { await api('/api/queue/' + e.target.dataset.top, { method: 'PATCH', body: JSON.stringify({ top: true }) }); toast('بقى أول طلب'); return load(); }
   const id = e.target.dataset.del; if (!id) return;
   const q = S.queue.find((x) => x.id === id);
   e.target.closest('li').classList.add('leaving');
@@ -299,11 +316,13 @@ function renderHistory() {
     ...S.actions.map((a) => ({
       k: a.type === 'job' ? 'job' : a.type === 'autopilot' ? 'run' : 'upload',
       at: a.at,
-      c: a.type === 'job' ? (a.code === 0 ? 'var(--mm)' : 'var(--play)') : 'var(--muted)',
-      t: a.type === 'job' ? `${ACTION_NAME[a.action] || a.action}${a.code === 0 ? '' : a.code === 'cancelled' ? ' (اتوقف)' : ' (فيه مشكلة)'}`
+      c: a.type === 'job' ? (a.code === 0 ? 'var(--mm)' : a.code === 'missing' ? 'var(--sl)' : 'var(--play)') : 'var(--muted)',
+      t: a.type === 'job' ? `${ACTION_NAME[a.action] || a.action}${a.code === 0 ? '' : a.code === 'cancelled' ? ' (اتوقف)' : a.code === 'missing' ? ' (فيه ملفات ناقصة)' : ' (فيه مشكلة)'}`
         : a.type === 'upload' ? 'ملف اتضاف' : a.type === 'queue' ? 'طلب جديد' : a.type === 'rules' ? 'الثوابت اتعدّلت'
-        : a.type === 'autopilot' ? (a.paused ? 'الطيار الآلي وقف' : 'الطيار الآلي اشتغل') : a.type,
-      d: a.file || a.rel || (a.tail || []).slice(-2).join(' / '),
+        : a.type === 'autopilot' ? (a.paused ? 'الطيار الآلي وقف' : 'الطيار الآلي اشتغل')
+        : a.type === 'autosync' ? 'مزامنة تلقائية بدأت' : a.type === 'autosync-set' ? (a.on ? 'المزامنة التلقائية اشتغلت' : 'المزامنة التلقائية وقفت')
+        : a.type === 'account' ? `أكونت ${a.email || a.n}: ${a.limited ? 'وصل للحد' : 'رجع متاح'}` : a.type === 'account-onoff' ? `أكونت ${a.email}: ${a.on ? 'اتفتح للعامل' : 'اتقفل للعامل'}` : a.type === 'settings' ? 'التخصيص اتغيّر' : a.type === 'make' ? 'طلب سلايدز من العامل' : a.type === 'worker-run' ? 'العامل اشتغل دلوقتي' : a.type === 'downloads-trash' ? 'تنزيلات بايظة راحت الـ Trash' : a.type,
+      d: a.file || a.rel || (a.files ? `${ar.format(a.files)} ملف` : '') || (a.tail || []).slice(-2).join(' / '),
     })),
   ].filter((r) => histFilter === 'all' || r.k === histFilter).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 60);
   $('#history').innerHTML = rows.length
@@ -329,18 +348,19 @@ function attach(action) {
   es.onmessage = (e) => logLine(JSON.parse(e.data).line);
   es.addEventListener('end', (e) => {
     const { code } = JSON.parse(e.data); es.close(); streaming = false; setBusy(null);
-    st.className = 'state ' + (code === 0 ? 'ok' : 'bad');
-    st.textContent = code === 0 ? 'خلص تمام' : code === 'cancelled' ? 'اتوقف' : 'خلص بمشكلة، بص على الشاشة';
+    st.className = 'state ' + (code === 0 ? 'ok' : code === 'missing' ? 'warn' : 'bad');
+    st.textContent = code === 0 ? 'خلص تمام' : code === 'cancelled' ? 'اتوقف' : code === 'missing' ? 'خلص، بس فيه ملفات لسه مش على الدرايف' : 'خلص بمشكلة، بص على الشاشة';
     if (!$('#log').textContent.trim()) logLine(code === 'cancelled' ? 'اتوقف قبل ما يخلص.' : action === 'pull' ? 'مفيش جديد.' : 'كله متطابق، مفيش حاجة ناقصة.');
-    toast(code === 0 ? (ACTION_NAME[action] || action) + ': خلص' : code === 'cancelled' ? 'اتوقف' : 'حصلت مشكلة');
-    if (code === 0) burst(document.querySelector(`[data-run="${action}"]`));
-    load();
+    toast(code === 0 ? (ACTION_NAME[action] || action) + ': خلص' : code === 'cancelled' ? 'اتوقف' : code === 'missing' ? 'فيه ملفات لسه مترفعتش، شغّل الرفع تاني' : 'حصلت مشكلة');
+    if (code === 0 && SET['look.confetti'] !== false) burst(document.querySelector(`[data-run="${action}"]`));
+    load(); if (S?.waiting?.length) setTimeout(load, 3500);
   });
   es.onerror = () => { es.close(); streaming = false; setBusy(null); };
 }
 $$('[data-run]').forEach((b) => b.addEventListener('click', async () => {
-  try { await api('/api/run/' + b.dataset.run, { method: 'POST' }); attach(b.dataset.run); } catch (e) { toast(e.message); }
+  try { const r = await api('/api/run/' + b.dataset.run, { method: 'POST' }); if (r.queued) { toast(`اتحط في الطابور، رقمه ${ar.format(r.position)}`); load(); } else attach(b.dataset.run); } catch (e) { toast(e.message); }
 }));
+$('#waitList').addEventListener('click', async (e) => { const id = e.target.dataset.wait; if (!id) return; await api('/api/waiting/' + id, { method: 'DELETE' }); toast('اتشال من الطابور'); load(); });
 $('#cancelJob').addEventListener('click', async () => { await api('/api/job/cancel', { method: 'POST' }); toast('بيوقف…'); });
 $('#pilot').addEventListener('change', async (e) => {
   const paused = !e.target.checked;
@@ -351,13 +371,37 @@ $('#pilot').addEventListener('change', async (e) => {
 // ---------- settings ----------
 async function renderSettings() {
   $('#sPilot').textContent = S.paused ? 'واقف' : 'شغّال';
+  renderAccounts(); renderStatus();
   const h = await api('/api/health').catch(() => null);
   if (!h) return;
   $('#hDrive').textContent = h.checking ? 'بيفحص…' : h.drive ? 'متوصّل ✓' : 'مش متوصّل';
-  $('#hSpace').textContent = h.usedGB != null ? `${ar.format(h.usedGB)} جيجا مستخدمة · ${ar.format(h.freeGB)} فاضية` : '—';
+  $('#hSpace').textContent = h.usedGB != null ? `${ar.format(h.usedGB)} جيجا مستخدمة · ${ar.format(h.freeGB)} فاضية${h.freeGB < (SET['safe.lowSpaceGB'] || 5) ? ' ⚠ المساحة قربت تخلص' : ''}` : '—';
   $('#hKey').hidden = !h.sharedKey;
   if (h.checking) setTimeout(() => route === 'settings' && renderSettings(), 4000);
 }
+// NotebookLM accounts: who is free, who hit the ~5-hour limit
+async function renderAccounts() {
+  const list = await api('/api/accounts').catch(() => null); if (!list) return;
+  $('#gemAccts').innerHTML = list.map((a) => `<a class="gem-btn" href="https://notebook.google.com/?authuser=${a.n}" target="_blank" rel="noopener" data-tip="${esc(a.email)}${a.note ? ' (' + esc(a.note) + ')' : ''}"><span class="gem-star"></span>${ar.format(a.n + 1)}</a>`).join('');
+  const free = list.filter((a) => !a.limited).length;
+  $('#acctList').innerHTML = list.map((a, i) => `<li class="${a.limited ? 'limited' : ''}" style="--i:${i}"><div><i class="adot" style="--c:${a.limited ? 'var(--play)' : 'var(--mm)'}"></i><div><b>${ar.format(a.n + 1)} · ${esc(a.email)}</b><small>${a.limited ? 'وصل للحد، يرجع ' + dayTime.format(new Date(a.freeAt)) : 'متاح'}</small></div></div><button class="btn ghost small" data-acct="${a.n}" data-lim="${a.limited ? 0 : 1}">${a.limited ? 'رجّعه متاح' : 'وصل للحد'}</button></li>`).join('')
+    + (free ? '' : `<li class="limited"><div><i class="adot" style="--c:var(--play)"></i><b>كل الأكونتات واقفة. أول واحد يرجع ${dayTime.format(new Date(Math.min(...list.map((a) => Date.parse(a.freeAt)))))}</b></div></li>`);
+}
+$('#acctList').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-acct]'); if (!b) return;
+  await api('/api/accounts', { method: 'POST', body: JSON.stringify({ n: +b.dataset.acct, limited: b.dataset.lim === '1' }) });
+  toast(b.dataset.lim === '1' ? 'اتعلّم إنه وصل للحد، هيرجع بعد ٥ ساعات' : 'الأكونت رجع متاح'); renderAccounts();
+});
+// automation status: rclone / download watchers running outside the dashboard, broken downloads
+async function renderStatus() {
+  const s = await api('/api/status').catch(() => null); if (!s) return;
+  $('#stRclone').textContent = s.rclone.length ? `${ar.format(s.rclone.length)} شغال` : 'مفيش';
+  $('#stWatch').textContent = s.watchers.length ? `${ar.format(s.watchers.length)} شغال${s.watchers.length > 1 ? ' (أكتر من واحد ممكن يلخبط الملفات)' : ''}` : 'مفيش';
+  $('#stBad').textContent = s.downloads.length ? `${ar.format(s.downloads.length)} ملف` : 'مفيش ✓';
+  $('#trashBad').hidden = !s.downloads.length;
+  $('#procList').innerHTML = [...s.rclone.map((p) => 'rclone ' + p.cmd), ...s.watchers.map((p) => p.cmd), ...s.downloads.map((d) => `~/Downloads/${d.name} (${d.size} B)`)].map((t) => `<li>${esc(t)}</li>`).join('');
+}
+$('#trashBad').addEventListener('click', async () => { const r = await api('/api/downloads/trash', { method: 'POST' }); toast(`${ar.format(r.moved)} ملف راح الـ Trash`); renderStatus(); });
 $('#recheck').addEventListener('click', async () => { await api('/api/health?force'); toast('بيفحص الدرايف…'); setTimeout(renderSettings, 3000); });
 $('#openRoot').addEventListener('click', async () => { await api('/api/open', { method: 'POST', body: JSON.stringify({ rel: '' }) }); toast('فولدر المحاضرات اتفتح'); });
 $('#openClaude').addEventListener('click', async () => { await api('/api/claude', { method: 'POST' }); toast('افتح Scheduled ← lectures-unsorted-autopilot ← Run now'); });
@@ -371,7 +415,15 @@ async function loadRules() {
   const r = await api('/api/rules/' + rulesKey);
   $('#rulesText').value = r.text; rulesDirty = false;
   $('#rulesInfo').textContent = 'آخر تعديل ' + dayTime.format(new Date(r.mtime));
+  const vs = await api(`/api/rules/${rulesKey}/versions`).catch(() => []);
+  $('#rulesVer').innerHTML = '<option value="">رجّع نسخة قديمة…</option>' + vs.map((v) => `<option value="${esc(v.id)}">${dayTime.format(new Date(v.at))}${v.id.startsWith('backups/') ? ' (نسخة اليوم)' : ''}</option>`).join('');
 }
+// an old version only fills the editor; nothing changes until «احفظ التعديل»
+$('#rulesVer').addEventListener('change', async (e) => {
+  if (!e.target.value) return;
+  const v = await api(`/api/rules/${rulesKey}/versions?id=${encodeURIComponent(e.target.value)}`);
+  $('#rulesText').value = v.text; rulesDirty = true; $('#rulesInfo').textContent = 'دي نسخة قديمة، دوس «احفظ التعديل» لو عايز ترجّعها';
+});
 $$('.tabs .chip').forEach((c) => c.addEventListener('click', () => {
   if (rulesDirty && !confirm('في تعديل مش محفوظ. تسيبه؟')) return;
   rulesKey = c.dataset.r;
@@ -389,7 +441,9 @@ document.body.classList.add('loading');
 go();
 load().then(() => go()).finally(() => hideSplash?.());
 loadRules().catch(() => {});
-setInterval(() => { if (!streaming && !document.hidden && !$('#drawer').open && !(route === 'rules' && rulesDirty)) load(); }, 20000);
+// data refresh every ui.refreshSeconds (restarted when that setting changes)
+function startRefresh() { clearInterval(startRefresh.t); startRefresh.t = setInterval(() => { if (!streaming && !document.hidden && !$('#drawer').open && !(route === 'rules' && rulesDirty) && !(route === 'custom' && czBusy)) load(); }, (SET['ui.refreshSeconds'] || 20) * 1000); }
+startRefresh();
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 
@@ -408,7 +462,7 @@ function setCount(text) {
 
 // editor lanes: every output made today/recently appears as a clip at the hour it was made
 function drawLanes() {
-  const lanes = { tr: 0, mm: 1, sl: 2, ar: 3 }, tracks = $$('.lane-track');
+  const lanes = { sl: 0, ar: 1, en: 2, pr: 3 }, tracks = $$('.lane-track');
   if (!tracks.length) return;
   tracks.forEach((t) => (t.innerHTML = ''));
   const day = Date.now() - 86400e3, clips = [];
@@ -429,7 +483,7 @@ function drawLanes() {
 
 // donut: how many files of each output type exist
 function drawDonut() {
-  const counts = KEYS.map(([k, n]) => [k, n, S.items.reduce((a, it) => a + (it.outputs[k]?.length || 0), 0)]).filter((r) => r[2]);
+  const counts = ALL_KEYS.map(([k, n]) => [k, n, S.items.reduce((a, it) => a + (it.outputs[k]?.length || 0), 0)]).filter((r) => r[2]);
   const total = counts.reduce((a, r) => a + r[2], 0), C = 2 * Math.PI * 46;
   let off = 0;
   $('#donut').innerHTML = `<circle r="46" cx="60" cy="60" style="stroke:var(--line)"/>` + counts.map(([k, n, v]) => {
@@ -512,7 +566,7 @@ function hideSplash() { setTimeout(() => $('#splash').classList.add('gone'), Mat
 // command palette: jump anywhere or run anything from the keyboard
 const PAL = () => [
   ...Object.entries(PAGES).map(([k, v]) => ({ t: `روح لـ ${v}`, s: 'صفحة', c: 'var(--pr)', run: () => (location.hash = '#/' + k) })),
-  ...Object.entries(ACTION_NAME).map(([k, v]) => ({ t: v, s: 'أمر', c: 'var(--mm)', run: () => $(`[data-run="${k}"]`).click() })),
+  ...Object.entries(ACTION_NAME).filter(([k]) => $(`[data-run="${k}"]`)).map(([k, v]) => ({ t: v, s: 'أمر', c: 'var(--mm)', run: () => $(`[data-run="${k}"]`).click() })),
   { t: S?.paused ? 'شغّل الطيار الآلي' : 'وقّف الطيار الآلي', s: 'أمر', c: 'var(--sl)', run: () => $('#pilot').click() },
   { t: 'افتح فولدر المحاضرات', s: 'أمر', c: 'var(--sl)', run: () => $('#openRoot').click() },
   ...(S ? S.items.filter((i) => !i.inUnsorted).map((i) => ({ t: i.name, s: i.subject, c: i.missing.length ? 'var(--sl)' : 'var(--mm)', run: () => openDrawer(i) })) : []),
@@ -596,7 +650,7 @@ addEventListener('pointermove', (e) => {
 
 // base colour picker (kept per browser)
 function setBase(b) { document.documentElement.dataset.base = b; try { localStorage.setItem('base', b); } catch {} $$('.swatch').forEach((x) => x.setAttribute('aria-pressed', x.dataset.base === b)); }
-$$('.swatch').forEach((x) => x.addEventListener('click', () => { const go = () => setBase(x.dataset.base); document.startViewTransition && !reduced ? document.startViewTransition(go) : go(); }));
+$$('.swatch').forEach((x) => x.addEventListener('click', () => { const go = () => setBase(x.dataset.base); document.startViewTransition && !reduced ? document.startViewTransition(go) : go(); saveSetting('look.base', x.dataset.base); }));
 setBase(document.documentElement.dataset.base || 'navy');
 
 
@@ -606,9 +660,10 @@ setBase(document.documentElement.dataset.base || 'navy');
 const EMPTY = '<svg viewBox="0 0 120 80" class="empty-art" aria-hidden="true"><rect x="14" y="20" width="92" height="50" rx="10"/><path d="M14 38h92"/><circle cx="60" cy="56" r="6"/><path d="M40 12h40" class="dash"/></svg>';
 
 // greeting by time of day + "updated X ago"
+const NAME = () => SET['ui.name'] || 'Morfi';
 function greet() {
   const h = new Date().getHours();
-  $('#greet').textContent = h < 5 ? 'سهران يا Morfi؟' : h < 12 ? 'صباح الخير يا Morfi' : h < 17 ? 'يومك حلو يا Morfi' : 'مساء الخير يا Morfi';
+  $('#greet').textContent = h < 5 ? `سهران يا ${NAME()}؟` : h < 12 ? `صباح الخير يا ${NAME()}` : h < 17 ? `يومك حلو يا ${NAME()}` : `مساء الخير يا ${NAME()}`;
   if (load.at) { const s = Math.round((Date.now() - load.at) / 1000); $('#fresh').textContent = s < 10 ? '· اتحدّث دلوقتي' : `· اتحدّث من ${s < 60 ? ar.format(s) + ' ثانية' : ar.format(Math.round(s / 60)) + ' دقيقة'}`; }
 }
 greet(); setInterval(greet, 5000);
@@ -650,15 +705,18 @@ addEventListener('drop', (e) => {
 });
 
 // desktop notifications: job finished, new file waiting in unsorted
-const canNotify = () => 'Notification' in window && Notification.permission === 'granted';
+const canNotify = (ev) => 'Notification' in window && Notification.permission === 'granted' && SET['notify.desktop'] !== false && (!ev || (SET['notify.events'] || []).includes(ev)) && !(SET['notify.quiet'] || []).includes(new Date().getHours());
 function notifyBtnState() { const b = $('#notifyBtn'); if (!('Notification' in window)) { b.textContent = 'مش مدعومة'; b.disabled = true; return; } b.textContent = Notification.permission === 'granted' ? 'شغّالة ✓' : Notification.permission === 'denied' ? 'مقفولة من المتصفح' : 'شغّل الإشعارات'; b.disabled = Notification.permission !== 'default'; }
 $('#notifyBtn').addEventListener('click', async () => { await Notification.requestPermission(); notifyBtnState(); if (canNotify()) new Notification('الإشعارات اشتغلت', { body: 'هقولك لما عملية تخلص أو ملف جديد يوصل.', icon: 'icon-192.png' }); });
 notifyBtnState();
 function notifyChanges() {
   const pend = S.items.filter((i) => i.inUnsorted && i.missing.length).length;
-  if (notifyChanges.pend !== undefined && pend > notifyChanges.pend && canNotify()) new Notification('ملف جديد في الوارد', { body: `فيه ${pend} ملف مستني يتعمله ملفات.`, icon: 'icon-192.png' });
+  if (notifyChanges.pend !== undefined && pend > notifyChanges.pend && canNotify('new')) new Notification('ملف جديد في الوارد', { body: `فيه ${pend} ملف مستني يتعمله ملفات.`, icon: 'icon-192.png' });
   const last = S.actions.find((a) => a.type === 'job');
-  if (notifyChanges.job && last && last.at !== notifyChanges.job && document.hidden && canNotify()) new Notification(`${ACTION_NAME[last.action] || last.action}: ${last.code === 0 ? 'خلص' : 'فيه مشكلة'}`, { icon: 'icon-192.png' });
+  if (notifyChanges.job && last && last.at !== notifyChanges.job && document.hidden && canNotify(last.code === 'missing' ? 'missing' : last.code === 0 ? 'done' : 'fail')) new Notification(`${ACTION_NAME[last.action] || last.action}: ${last.code === 0 ? 'خلص' : last.code === 'missing' ? 'خلص بس فيه ملفات لسه مش على الدرايف' : 'فيه مشكلة'}`, { icon: 'icon-192.png' });
+  const acc = S.actions.find((a) => a.type === 'account' && a.limited);
+  if (notifyChanges.acc && acc && acc.at !== notifyChanges.acc && canNotify('limit')) new Notification(`أكونت ${acc.email} وصل للحد`, { body: 'هيرجع متاح بعد ٥ ساعات. الشغل بيكمّل على اللي بعده.', icon: 'icon-192.png' });
+  notifyChanges.acc = acc?.at || notifyChanges.acc || 'none';
   notifyChanges.pend = pend; notifyChanges.job = last?.at || notifyChanges.job || 'none';
 }
 
@@ -700,7 +758,7 @@ function cloudBadge(i) {
 }
 function syncBadge() { const n = SY?.ready ? SY.counts.local + SY.counts.drive + SY.counts.diff : 0; $('#syncBadge').hidden = !n; $('#syncBadge').textContent = ar.format(n); }
 async function runSync(url, body, action) {
-  try { await api(url, { method: 'POST', body: JSON.stringify(body) }); location.hash = '#/home'; attach(action); } catch (e) { toast(e.message); }
+  try { const r = await api(url, { method: 'POST', body: JSON.stringify(body) }); location.hash = '#/home'; if (r.queued) { toast(`اتحط في الطابور، رقمه ${ar.format(r.position)}`); load(); } else attach(action); } catch (e) { toast(e.message); }
 }
 function renderSync() {
   if (!SY) return;
@@ -730,3 +788,161 @@ $('#rescan').addEventListener('click', async () => { SY = await api('/api/sync?r
 $('#autosync').addEventListener('change', async (e) => { await api('/api/autosync', { method: 'POST', body: JSON.stringify({ on: e.target.checked }) }); toast(e.target.checked ? 'المزامنة التلقائية اشتغلت: أي ملف جديد على الماك هيترفع لوحده' : 'المزامنة التلقائية وقفت'); load(); });
 $('#dUp').addEventListener('click', () => { $('#drawer').close(); runSync('/api/sync/folder', { rel: current.rel, dir: 'up' }, 'up'); });
 $('#dDown').addEventListener('click', () => { $('#drawer').close(); runSync('/api/sync/folder', { rel: current.rel, dir: 'down' }, 'down'); });
+
+// calm mode switch (Settings): saved per browser, reloads so every effect follows it
+$('#calm').checked = calm;
+$('#calm').addEventListener('change', (e) => saveSetting('look.calm', e.target.checked));
+
+
+// =====================================================================
+// WORKER: makes the outputs on its own (worker/worker.mjs)
+// =====================================================================
+const TASK_ST = { waiting: ['مستني دوره', 'var(--muted)'], working: ['شغّال عليها', 'var(--acc)'], done: ['خلصت', 'var(--mm)'], failed: ['فيها مشكلة', 'var(--play)'], later: ['مستنية أكونت يفضى', 'var(--sl)'], cancelled: ['اتلغت', 'var(--muted)'] };
+const OUT_NAME = { SRC: 'سلايدز', AR: 'عربي', EN: 'English', PR: 'للمقدم' };
+function renderWorker() {
+  if (!WK) { $('#wState').className = 'state bad'; $('#wState').textContent = 'العامل مش شغال'; return; }
+  const st = WK.status || {}, working = st.state === 'working';
+  $('#wState').className = 'state ' + (!WK.alive ? 'bad' : working ? 'busy' : 'ok');
+  $('#wState').textContent = !WK.alive ? 'العامل مش شغال' : working ? 'شغّال' : 'مستني';
+  $('#wStep').textContent = working ? [st.step, st.account && 'أكونت ' + st.account, st.last].filter(Boolean).join(' · ') : st.lastSummary ? `آخر دورة ${dayTime.format(new Date(st.lastCycle))}: ${st.lastSummary}` : 'لسه مشتغلش. أول دورة في الميعاد الجاي، أو دوس «اشتغل دلوقتي».';
+  $('#wSignin').hidden = !st.needsZen;
+  const T = WK.tasks.slice(0, 8);
+  $('#wTasks').innerHTML = T.length ? T.map((t, n) => { const [label, c] = TASK_ST[t.status] || [t.status, 'var(--muted)']; return `<li class="${t.status}" style="--c:${c};--i:${n}"><div><b>${esc(t.rel.split('/').pop())}</b><small>${t.outs.map((o) => OUT_NAME[o] || o).join(' + ')} · ${label}${t.error ? ' · ' + esc(t.error) : ''}${t.status === 'working' && t.log?.length ? ' · ' + esc(t.log[t.log.length - 1].slice(9)) : ''}</small></div><span class="row-actions">${['failed', 'later', 'done'].includes(t.status) ? `<button class="btn ghost small" data-wretry="${t.id}">تاني</button>` : ''}${['waiting', 'later'].includes(t.status) ? `<button class="x" data-wcancel="${t.id}" aria-label="الغيها">×</button>` : ''}</span></li>`; }).join('')
+    : '<li style="--c:var(--line)"><div><b>مفيش شغل لسه</b><small>افتح أي محاضرة من «المواد» واختار «اعمل دلوقتي».</small></div></li>';
+  if (route === 'settings') {
+    if (document.activeElement !== $('#wHours')) $('#wHours').value = (SET['worker.schedule'] || S.schedule).join(', ');
+    $('#wAuto').checked = !!SET['worker.auto'];
+    $('#wNtfy').textContent = SET['notify.ntfy'] ? 'شغّالة' : 'مقفولة'; $('#wNtfyBtn').textContent = SET['notify.ntfy'] ? 'اعرض الكود' : 'شغّلها';
+  }
+}
+$('#wTasks').addEventListener('click', async (e) => {
+  const r = e.target.dataset.wretry, c = e.target.dataset.wcancel; if (!r && !c) return;
+  try { await api(`/api/worker/task/${r || c}/${r ? 'retry' : 'cancel'}`, { method: 'POST' }); toast(r ? 'رجعت للطابور' : 'اتلغت'); load(); } catch (err) { toast(err.message); }
+});
+$('#wRun').addEventListener('click', async () => { await api('/api/worker/run', { method: 'POST' }); toast('العامل هيبدأ خلال نص دقيقة'); });
+const signin = async () => { if (!confirm('Zen هيتقفل ويتفتح تاني والتابات بترجع. تمام؟')) return; await api('/api/worker/zen', { method: 'POST' }); toast('Zen بيتفتح من جديد للعامل…'); };
+$('#wSigninBtn').addEventListener('click', signin); $('#wSignin2').addEventListener('click', signin);
+$('#dMakeGo').addEventListener('click', async () => {
+  const outs = $$('#dMake input:checked').filter((c) => !c.closest('label').hidden).map((c) => c.value);
+  try { await api('/api/worker/make', { method: 'POST', body: JSON.stringify({ rel: current.rel, outs }) }); $('#drawer').close(); toast('العامل استلمها، هتلاقيها في الرئيسية'); load(); } catch (e) { toast(e.message); }
+});
+$('#wHoursSave').addEventListener('click', () => { const h = $('#wHours').value.split(/[^\d]+/).filter(Boolean).map(Number); if (!h.length) return toast('اكتب ساعة واحدة على الأقل'); saveSetting('worker.schedule', h, 'المواعيد اتحفظت'); });
+$('#wAuto').addEventListener('change', (e) => saveSetting('worker.auto', e.target.checked, e.target.checked ? 'العامل هيعمل الناقص لوحده' : 'العامل هيعمل طلباتك بس'));
+$('#wNtfyBtn').addEventListener('click', async () => {
+  let topic = SET['notify.ntfy'];
+  if (!topic) { topic = 'morfi-lectures-' + crypto.randomUUID().slice(0, 13); await saveSetting('notify.ntfy', topic, null); }
+  try { await navigator.clipboard.writeText(topic); } catch {}
+  toast(`نزّل تطبيق ntfy على الموبايل، واعمل Subscribe على: ${topic} (اتنسخ)`, 'تمام', () => {});
+});
+
+
+// =====================================================================
+// CUSTOMIZE: the page is drawn from the settings schema (settings.mjs)
+// =====================================================================
+let CZ = null, czBusy = false;
+async function loadSettings() {
+  try { CZ = await api('/api/settings'); SET = CZ.values; applySettings(); } catch {}
+}
+// apply what can change live on this page; calm mode reloads so every effect follows it
+function applySettings() {
+  const root = document.documentElement, v = SET;
+  if (v['look.base'] && root.dataset.base !== v['look.base']) setBase(v['look.base']);
+  if (v['look.accent'] === 'blue') delete root.dataset.accent; else root.dataset.accent = v['look.accent'];
+  root.style.fontSize = (Number(v['look.fontScale']) || 100) + '%';
+  root.dataset.density = v['look.density'] || 'cozy';
+  const wantCalm = !!v['look.calm'];
+  try { if ((localStorage.getItem('calm') === '1') !== wantCalm) { localStorage.setItem('calm', wantCalm ? '1' : '0'); location.reload(); return; } } catch {}
+  $('#calm').checked = wantCalm;
+  $('#stars')?.toggleAttribute('hidden', v['look.stars'] === false);
+  const cards = new Set(v['look.homeCards'] || []), map = { hero: '.page[data-page="home"] .day', kpis: '.kpis', charts: '.charts', commands: '.deck', console: '.console', worker: '#workerCard' };
+  for (const [k, sel] of Object.entries(map)) $(sel)?.classList.toggle('hide-card', !cards.has(k));
+  const loc = v['ui.digits'] === 'latn' ? 'ar-EG-u-nu-latn' : 'ar-EG', h12 = v['ui.clock'] !== '24';
+  ar = new Intl.NumberFormat(loc);
+  time = new Intl.DateTimeFormat(loc, { hour: 'numeric', minute: '2-digit', hour12: h12 });
+  dayTime = new Intl.DateTimeFormat(loc, { weekday: 'long', hour: 'numeric', minute: '2-digit', hour12: h12 });
+  startRefresh(); greet();
+}
+async function saveSetting(key, value, msg = 'اتحفظ ✓') {
+  try { const r = await api('/api/settings', { method: 'POST', body: JSON.stringify({ values: { [key]: value } }) }); SET = r.values; if (CZ) CZ.values = SET; applySettings(); if (msg) toast(msg); load(); return true; }
+  catch (e) { toast(e.message); return false; }
+}
+const czDefault = (s) => JSON.stringify(SET[s.key]) === JSON.stringify(s.default);
+function czControl(s) {
+  const v = SET[s.key], id = 'cz-' + s.key.replace(/\W/g, '_');
+  switch (s.type) {
+    case 'bool': return `<label class="pilot small-switch"><input type="checkbox" id="${id}" role="switch" ${v ? 'checked' : ''}><span class="knob" aria-hidden="true"></span></label>`;
+    case 'int': return `<input type="number" id="${id}" min="${s.min}" max="${s.max}" value="${v}" inputmode="numeric">`;
+    case 'text': return `<input type="text" id="${id}" value="${esc(v)}" dir="auto">`;
+    case 'textarea': return `<textarea id="${id}" class="${/[؀-ۿ]/.test(v) ? 'rtl' : ''}" spellcheck="false">${esc(v)}</textarea>`;
+    case 'select': return `<select id="${id}">${s.options.map(([o, l]) => `<option value="${esc(o)}" ${o === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+    case 'multi': return `<div class="cz-multi" id="${id}">${s.options.map(([o, l]) => `<label><input type="checkbox" value="${esc(o)}" ${v.includes(o) ? 'checked' : ''}>${esc(l)}</label>`).join('')}</div>`;
+    case 'hours': return `<input type="text" id="${id}" value="${v.join(', ')}" inputmode="numeric" dir="ltr" placeholder="9, 15, 21">`;
+    case 'list': return `<textarea id="${id}" class="rtl" spellcheck="false">${esc(v.join('\n'))}</textarea>`;
+  }
+}
+function czRead(s, el) {
+  switch (s.type) {
+    case 'bool': return el.checked;
+    case 'multi': return [...el.querySelectorAll('input:checked')].map((x) => x.value);
+    case 'list': return el.value.split('\n');
+    default: return el.value;
+  }
+}
+async function renderCustom() {
+  if (!CZ) await loadSettings(); if (!CZ) return;
+  const q = $('#czQ').value.trim().toLowerCase(), onlyChanged = $('#czChanged').checked;
+  const match = (s) => (!q || (s.label + ' ' + (s.help || '') + ' ' + s.key).toLowerCase().includes(q)) && (!onlyChanged || !czDefault(s));
+  const groups = CZ.groups.map(([g, title, sub]) => [g, title, sub, CZ.schema.filter((s) => s.group === g && match(s))]).filter((x) => x[3].length);
+  $('#czJump').innerHTML = groups.map(([g, title]) => `<a href="#cz-g-${g}" data-g="${g}">${esc(title)}</a>`).join('');
+  $('#czGroups').innerHTML = groups.length ? groups.map(([g, title, sub, list], i) => `<section class="card cz-group" id="cz-g-${g}" style="--i:${i}"><h2>${esc(title)}</h2><p class="muted small">${esc(sub)}</p>${list.map((s) => `
+    <div class="cz-row ${['textarea', 'list', 'multi'].includes(s.type) ? 'wide' : ''} ${czDefault(s) ? '' : 'changed'}" data-key="${s.key}">
+      <label class="lbl" for="cz-${s.key.replace(/\W/g, '_')}">${esc(s.label)}${s.help ? `<small>${esc(s.help)}</small>` : ''}</label>
+      <div class="ctl">${czControl(s)}</div>
+      <button class="cz-reset" data-reset="${s.key}" title="رجّعه للأصلي" aria-label="رجّع ${esc(s.label)} للأصلي" ${czDefault(s) ? 'hidden' : ''}>↺</button>
+    </div>`).join('')}</section>`).join('') : '<div class="card cz-empty">مفيش إعداد بالاسم ده.</div>';
+  renderCzAccounts();
+}
+// every control saves itself: toggles/selects at once, typing after a short pause
+$('#czGroups').addEventListener('change', (e) => czSave(e.target));
+$('#czGroups').addEventListener('input', (e) => { if (!e.target.matches('input[type=text], input[type=number], textarea')) return; czBusy = true; clearTimeout(czSave.t); czSave.t = setTimeout(() => czSave(e.target), 900); });
+async function czSave(target) {
+  const row = target.closest('.cz-row'); if (!row) return;
+  const s = CZ.schema.find((x) => x.key === row.dataset.key), el = row.querySelector('.ctl > *').matches('label.pilot') ? row.querySelector('input') : row.querySelector('.ctl > *');
+  clearTimeout(czSave.t); czBusy = false;
+  if (await saveSetting(s.key, czRead(s, el), null)) {
+    row.classList.toggle('changed', !czDefault(s)); row.querySelector('.cz-reset').hidden = czDefault(s);
+    row.classList.remove('saved'); void row.offsetWidth; row.classList.add('saved');
+    toast(`${s.label}: اتحفظ ✓`);
+  } else renderCustom(); // a refused value goes back to the saved one
+}
+$('#czGroups').addEventListener('click', async (e) => {
+  const k = e.target.dataset.reset; if (!k) return;
+  const r = await api('/api/settings', { method: 'POST', body: JSON.stringify({ reset: [k] }) }); SET = CZ.values = r.values; applySettings(); renderCustom(); toast('رجع للأصلي');
+});
+$('#czQ').addEventListener('input', () => renderCustom());
+$('#czChanged').addEventListener('change', () => renderCustom());
+$('#czJump').addEventListener('click', (e) => { const a = e.target.closest('a[data-g]'); if (!a) return; e.preventDefault(); $('#cz-g-' + a.dataset.g)?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' }); });
+$('#czExport').addEventListener('click', () => {
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([JSON.stringify(SET, null, 2)], { type: 'application/json' })), download: `تخصيص اللوحة - ${new Date().toISOString().slice(0, 10)}.json` });
+  a.click(); URL.revokeObjectURL(a.href); toast('النسخة اتنزّلت');
+});
+$('#czImport').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return; e.target.value = '';
+  try { const values = JSON.parse(await f.text()); const r = await api('/api/settings', { method: 'POST', body: JSON.stringify({ values, replace: true }) }); SET = CZ.values = r.values; applySettings(); renderCustom(); toast('النسخة اترفعت واتطبّقت'); }
+  catch (err) { toast('الملف ده مش نسخة تخصيص صالحة: ' + err.message); }
+});
+$('#czResetAll').addEventListener('click', async () => {
+  if (!confirm('كل الإعدادات هترجع للأصلي. نزّل نسخة الأول لو عايز ترجعلها. تمام؟')) return;
+  const r = await api('/api/settings', { method: 'POST', body: JSON.stringify({ values: {}, replace: true }) }); SET = CZ.values = r.values; applySettings(); renderCustom(); toast('كله رجع للأصلي');
+});
+// accounts: switch each one on or off for the worker
+async function renderCzAccounts() {
+  const list = await api('/api/accounts').catch(() => null); if (!list) return;
+  $('#czAccts').innerHTML = list.map((a, i) => `<li class="${a.disabled ? 'limited' : ''}" style="--i:${i}"><div><i class="adot" style="--c:${a.disabled ? 'var(--muted)' : a.limited ? 'var(--play)' : 'var(--mm)'}"></i><div><b>${ar.format(a.n)} · ${esc(a.email)}</b><small>${a.disabled ? 'مقفول للعامل' : a.limited ? 'وصل للحد' : 'متاح'}${a.note ? ' · ' + esc(a.note) : ''}</small></div></div><label class="pilot small-switch"><input type="checkbox" role="switch" data-acc-on="${a.n}" ${a.disabled ? '' : 'checked'}><span class="knob" aria-hidden="true"></span></label></li>`).join('');
+}
+$('#czAccts').addEventListener('change', async (e) => {
+  const n = e.target.dataset.accOn; if (n === undefined) return;
+  try { await api('/api/accounts', { method: 'POST', body: JSON.stringify({ n: +n, disabled: !e.target.checked }) }); toast(e.target.checked ? 'الأكونت رجع للعامل' : 'الأكونت اتقفل للعامل'); renderCzAccounts(); } catch (err) { toast(err.message); }
+});
+// boot: settings first, then the start page when no page is in the link
+loadSettings().then(() => { if (!location.hash && SET['ui.startPage'] && SET['ui.startPage'] !== 'home') location.hash = '#/' + SET['ui.startPage']; });
