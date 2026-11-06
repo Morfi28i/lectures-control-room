@@ -241,8 +241,9 @@ const UNIT = { B: 1 / 1024, KiB: 1, MiB: 1024, GiB: 1048576 };
 function watchSpeed(j, line) {
   const m = line.match(/,\s*(\d+)%,\s*([\d.]+)\s*(B|KiB|MiB|GiB)\/s/);
   if (m) {
-    const kbs = Number(m[2]) * UNIT[m[3]], pct = Number(m[1]); j.kbs = kbs;
-    if (pct >= 100 || kbs >= settings()['drive.slowKBs']) j.slowSince = null; else j.slowSince ||= Date.now();
+    // 100% is not "done": the last file can hang there while Drive finishes it; only a "Copied" line counts as finished
+    const kbs = Number(m[2]) * UNIT[m[3]]; j.kbs = kbs;
+    if (kbs >= settings()['drive.slowKBs']) j.slowSince = null; else j.slowSince ||= Date.now();
   } else if (/Copied|Updated|— فحص —/.test(line)) j.slowSince = null; // a finished file is progress
 }
 // what each fix does, in order; Morfi sees every step in the console
@@ -406,11 +407,13 @@ function nextRun(now = new Date()) {
 
 // ---------- server ----------
 const okHosts = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
+// the Mac's private Tailscale address (setting remote.hosts) opens the page from Morfi's own phone
+const hostOk = (h) => okHosts.has(h) || settings()['remote.hosts'].includes(h);
 // the hosted copy of the page (GitHub Pages) may talk to this server, but only from this Mac's own browser
 const HOSTED = 'https://morfi28i.github.io';
 http.createServer(async (req, res) => {
   try {
-    if (!okHosts.has(req.headers.host)) return send(res, 403, { error: 'host' });
+    if (!hostOk(req.headers.host)) return send(res, 403, { error: 'host' });
     const origin = req.headers.origin;
     if (origin === HOSTED) {
       res.setHeader('access-control-allow-origin', HOSTED);
@@ -424,7 +427,7 @@ http.createServer(async (req, res) => {
         });
         return res.end();
       }
-    } else if (req.method !== 'GET' && origin && !okHosts.has(origin.replace(/^https?:\/\//, ''))) return send(res, 403, { error: 'origin' });
+    } else if (req.method !== 'GET' && origin && !hostOk(origin.replace(/^https?:\/\//, ''))) return send(res, 403, { error: 'origin' });
     const u = new URL(req.url, `http://${req.headers.host}`);
     const r = u.pathname;
 

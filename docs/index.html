@@ -9,6 +9,10 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="المحاضرات">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -43,6 +47,7 @@
       <li><a href="#/rules" data-route="rules"><svg viewBox="0 0 24 24"><path d="M7 4h10v16H7zM10 8h4M10 12h4M10 16h2"/></svg><span>الثوابت</span></a></li>
       <li><a href="#/settings" data-route="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><span>الإعدادات</span></a></li>
       <li><a href="#/custom" data-route="custom"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>التخصيص</span></a></li>
+      <li class="nav-more"><button type="button" id="moreBtn" aria-haspopup="dialog"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg><span>المزيد</span></button></li>
     </ul>
     <button class="palbtn" id="palBtn"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4-4"/></svg><span>بحث وأوامر</span><kbd>⌘K</kbd></button>
     <div class="side-foot">
@@ -71,7 +76,7 @@
 
     <section class="offline-note card" role="alert">
       <h2>اللوحة مش لاقية الماك</h2>
-      <p>التحكم بيشتغل من الماك بتاعك بس. افتح التطبيق من الماك والسيرفر شغال، وهو هيتوصل لوحده.</p>
+      <p id="offlineText">النسخة دي بتكلّم الماك بس لو فاتحها من على الماك نفسه. من الموبايل، افتح اللينك الخاص بتاع الماك (Tailscale)، وهتلاقي كل حاجة شغالة. لازم الماك يكون صاحي.</p>
     </section>
 
     <main id="view" tabindex="-1">
@@ -307,7 +312,7 @@
             <div class="setting"><span>إشعارات على الموبايل (ntfy)</span><span class="row-actions"><b id="wNtfy">مقفولة</b><button class="btn ghost small" id="wNtfyBtn">شغّلها</button></span></div>
             <div class="setting"><span>الحالة</span><b id="sPilot">…</b></div>
             <div class="setting"><span>الدورة الجاية</span><b id="sNext">…</b></div>
-            <div class="setting"><span>شغّل الخطوات دلوقتي</span><button class="btn small" data-run="runnow" data-tip="يسحب الجديد من الدرايف، يرتّبه، ويرفع أي حاجة ناقصة">شغّل دلوقتي</button></div>
+            <div class="setting"><span>شغّل الخطوات دلوقتي</span><button class="btn small" id="wRun2" data-tip="العامل يسحب الجديد، يرتّبه، يعمل السلايدز الناقصة، ويرفعها">شغّل دلوقتي</button></div>
             <div class="setting gem"><span>أكونتات NotebookLM</span>
               <div class="gem-accts" id="gemAccts">
                 <a class="gem-btn" href="https://notebook.google.com/?authuser=0" target="_blank" rel="noopener" data-tip="sdyqs0437 (صاحب الدرايف)"><span class="gem-star"></span>١</a>
@@ -343,7 +348,7 @@
           <div class="card">
             <h2>التطبيق</h2>
             <p class="muted">نزّل اللوحة كتطبيق، هتفتح في شباك لوحدها ويبقى ليها أيقونة في الـDock.</p>
-            <div class="row-foot"><button class="btn" id="install" hidden>نزّل كتطبيق</button><span class="muted small" id="installHint">من Chrome: القايمة ← حفظ ومشاركة ← تثبيت الصفحة كتطبيق.</span></div>
+            <div class="row-foot"><button class="btn" id="install" hidden>نزّل كتطبيق</button><span class="muted small" id="installHint"></span></div>
             <div class="setting"><span>اللون الأساسي</span>
               <div class="swatches" role="group" aria-label="اللون الأساسي">
                 <button class="swatch" data-base="navy" title="كحلي" style="--sw-a:#0a1022;--sw-b:#18233f"></button>
@@ -372,6 +377,8 @@
     <footer>Designed &amp; developed by <a href="https://morfi28i.github.io/portfolio/" target="_blank" rel="noopener">Morfi</a></footer>
   </div>
 </div>
+
+<dialog id="moreSheet" class="sheet" aria-label="باقي الصفحات"><nav id="moreLinks"></nav></dialog>
 
 <dialog id="drawer" aria-labelledby="dTitle">
   <form method="dialog" class="d-close"><button aria-label="اقفل">×</button></form>

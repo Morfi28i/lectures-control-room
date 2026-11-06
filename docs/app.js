@@ -1,5 +1,5 @@
 // on the Mac the page is served by the server itself; the hosted copy talks to the server on this Mac
-const API = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? '' : 'http://localhost:4545';
+const API = location.hostname.endsWith('github.io') ? 'http://localhost:4545' : '';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 // translation and mind map are no longer made (2026-11-03): they stay only as history in the donut
@@ -321,7 +321,7 @@ function renderHistory() {
         : a.type === 'upload' ? 'ملف اتضاف' : a.type === 'queue' ? 'طلب جديد' : a.type === 'rules' ? 'الثوابت اتعدّلت'
         : a.type === 'autopilot' ? (a.paused ? 'الطيار الآلي وقف' : 'الطيار الآلي اشتغل')
         : a.type === 'autosync' ? 'مزامنة تلقائية بدأت' : a.type === 'autosync-set' ? (a.on ? 'المزامنة التلقائية اشتغلت' : 'المزامنة التلقائية وقفت')
-        : a.type === 'account' ? `أكونت ${a.email || a.n}: ${a.limited ? 'وصل للحد' : 'رجع متاح'}` : a.type === 'account-onoff' ? `أكونت ${a.email}: ${a.on ? 'اتفتح للعامل' : 'اتقفل للعامل'}` : a.type === 'settings' ? 'التخصيص اتغيّر' : a.type === 'make' ? 'طلب سلايدز من العامل' : a.type === 'worker-run' ? 'العامل اشتغل دلوقتي' : a.type === 'downloads-trash' ? 'تنزيلات بايظة راحت الـ Trash' : a.type,
+        : a.type === 'account' ? `أكونت ${a.email || a.n}: ${a.limited ? 'وصل للحد' : 'رجع متاح'}` : a.type === 'account-onoff' ? `أكونت ${a.email}: ${a.on ? 'اتفتح للعامل' : 'اتقفل للعامل'}` : a.type === 'zen-restart' ? 'العامل أعاد فتح Zen' : a.type === 'renamed' ? `اتسمّى: ${a.to}` : a.type === 'settings' ? 'التخصيص اتغيّر' : a.type === 'make' ? 'طلب سلايدز من العامل' : a.type === 'worker-run' ? 'العامل اشتغل دلوقتي' : a.type === 'downloads-trash' ? 'تنزيلات بايظة راحت الـ Trash' : a.type,
       d: a.file || a.rel || (a.files ? `${ar.format(a.files)} ملف` : '') || (a.tail || []).slice(-2).join(' / '),
     })),
   ].filter((r) => histFilter === 'all' || r.k === histFilter).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 60);
@@ -405,6 +405,12 @@ $('#trashBad').addEventListener('click', async () => { const r = await api('/api
 $('#recheck').addEventListener('click', async () => { await api('/api/health?force'); toast('بيفحص الدرايف…'); setTimeout(renderSettings, 3000); });
 $('#openRoot').addEventListener('click', async () => { await api('/api/open', { method: 'POST', body: JSON.stringify({ rel: '' }) }); toast('فولدر المحاضرات اتفتح'); });
 $('#openClaude').addEventListener('click', async () => { await api('/api/claude', { method: 'POST' }); toast('افتح Scheduled ← lectures-unsorted-autopilot ← Run now'); });
+// how to install on this device, when the browser does not offer its own button
+const UA = navigator.userAgent;
+$('#installHint').textContent = /iPhone|iPad|iPod/.test(UA) ? 'من Safari: زرار المشاركة ← Add to Home Screen.' : /Android/.test(UA) ? 'من Chrome: القايمة ⋮ ← Add to Home screen.' : 'من Chrome أو Edge: أيقونة التثبيت في شريط العنوان، أو القايمة ← تثبيت الصفحة كتطبيق.';
+if (matchMedia('(display-mode: standalone)').matches) $('#installHint').textContent = 'اللوحة متسطّبة كتطبيق على الجهاز ده ✓';
+// served by the Mac itself (private link): "not found" means the Mac is asleep or the connection is off
+if (!API) $('#offlineText').textContent = 'الماك مش بيرد. اتأكد إنه صاحي وعلى النت، وإن Tailscale شغال على الجهاز ده وعلى الماك. هتتوصل لوحدها أول ما يرجع.';
 let installEvt = null;
 addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; $('#install').hidden = false; $('#installHint').hidden = true; });
 $('#install').addEventListener('click', async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; $('#install').hidden = true; });
@@ -819,7 +825,8 @@ $('#wTasks').addEventListener('click', async (e) => {
   const r = e.target.dataset.wretry, c = e.target.dataset.wcancel; if (!r && !c) return;
   try { await api(`/api/worker/task/${r || c}/${r ? 'retry' : 'cancel'}`, { method: 'POST' }); toast(r ? 'رجعت للطابور' : 'اتلغت'); load(); } catch (err) { toast(err.message); }
 });
-$('#wRun').addEventListener('click', async () => { await api('/api/worker/run', { method: 'POST' }); toast('العامل هيبدأ خلال نص دقيقة'); });
+const workerRun = async () => { await api('/api/worker/run', { method: 'POST' }); toast('العامل هيبدأ خلال نص دقيقة، تابعه في كارت «العامل» في الرئيسية'); };
+$('#wRun').addEventListener('click', workerRun); $('#wRun2').addEventListener('click', workerRun);
 const signin = async () => { if (!confirm('Zen هيتقفل ويتفتح تاني والتابات بترجع. تمام؟')) return; await api('/api/worker/zen', { method: 'POST' }); toast('Zen بيتفتح من جديد للعامل…'); };
 $('#wSigninBtn').addEventListener('click', signin); $('#wSignin2').addEventListener('click', signin);
 $('#dMakeGo').addEventListener('click', async () => {
@@ -945,4 +952,13 @@ $('#czAccts').addEventListener('change', async (e) => {
   try { await api('/api/accounts', { method: 'POST', body: JSON.stringify({ n: +n, disabled: !e.target.checked }) }); toast(e.target.checked ? 'الأكونت رجع للعامل' : 'الأكونت اتقفل للعامل'); renderCzAccounts(); } catch (err) { toast(err.message); }
 });
 // boot: settings first, then the start page when no page is in the link
-loadSettings().then(() => { if (!location.hash && SET['ui.startPage'] && SET['ui.startPage'] !== 'home') location.hash = '#/' + SET['ui.startPage']; });
+loadSettings().then(() => { load.sig = null; load(); if (!location.hash && SET['ui.startPage'] && SET['ui.startPage'] !== 'home') location.hash = '#/' + SET['ui.startPage']; });
+
+
+// phones: four main tabs + «المزيد» opens a sheet with the other pages
+const MORE = ['books', 'activity', 'rules', 'settings', 'custom'];
+$('#moreLinks').innerHTML = MORE.map((r) => { const a = $(`.nav a[data-route="${r}"]`); return `<a href="#/${r}" data-route="${r}" style="--i:${MORE.indexOf(r)}">${a.querySelector('svg').outerHTML}<span>${PAGES[r]}</span></a>`; }).join('');
+$('#moreBtn').addEventListener('click', () => $('#moreSheet').showModal());
+$('#moreSheet').addEventListener('click', (e) => { if (e.target === e.currentTarget || e.target.closest('a')) e.currentTarget.close(); });
+const markMore = () => { const r = (location.hash.match(/^#\/(\w+)/) || [])[1]; $('#moreBtn').classList.toggle('on', MORE.includes(r)); $$('#moreLinks a').forEach((a) => a.classList.toggle('on', a.dataset.route === r)); };
+addEventListener('hashchange', markMore); markMore();
