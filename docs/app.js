@@ -345,21 +345,44 @@ function readableStats(line) {
     return kb < 100 ? `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB${rate}` : `${(kb / 1024).toFixed(2)} MB${rate}`;
   });
 }
-function logLine(text) {
-  const el = document.createElement('span'); el.className = 'l'; el.textContent = readableStats(text);
-  $('#log').append(el); $('#log').scrollTop = $('#log').scrollHeight;
+function logLine(text, stats) {
+  const box = $('#log'), bottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40, last = box.lastElementChild;
+  // rclone's progress is one line that keeps updating at the end of the screen
+  if (stats && last?.classList.contains('stats')) { last.textContent = readableStats(text); if (bottom) box.scrollTop = box.scrollHeight; return; }
+  const el = document.createElement('span'); el.className = stats ? 'l stats' : 'l'; el.textContent = readableStats(text);
+  if (!stats && last?.classList.contains('stats')) box.insertBefore(el, last); else box.append(el);
+  while (box.children.length > 400) box.firstElementChild.remove();
+  if (bottom) box.scrollTop = box.scrollHeight;
 }
+// log lines carry UTC times and task ids; the screen shows local time and plain words
+function liveLine(line) {
+  const m = line.match(/^(?:\[\w+\] )?(\d\d):(\d\d):(\d\d) (.*)$/); if (!m) return line;
+  const d = new Date(); d.setUTCHours(+m[1], +m[2], +m[3]);
+  return `${d.toLocaleTimeString('en-GB')}  ${m[4].replace(/PENDING: /g, 'ناقصها سلايدز: ').replace(/ \| ملخص وأهم النقاط \(سلايدز\)/g, '')}`;
+}
+let liveFrom = null, workerShown = false;
+async function followLive() {
+  if (document.hidden) return;
+  try {
+    const r = await api('/api/live' + (liveFrom === null ? '' : `?from=${liveFrom}`));
+    liveFrom = r.offset; r.lines.forEach((l) => logLine(liveLine(l)));
+    if (streaming) return;
+    const st = $('#jobState'), busy = r.worker.state === 'working';
+    if (busy) { st.className = 'state busy'; st.textContent = 'العامل: ' + (r.worker.step || 'شغّال'); } else if (workerShown) { st.className = 'state ok'; st.textContent = 'مستني'; }
+    workerShown = busy;
+  } catch {}
+}
+followLive(); setInterval(followLive, 2000);
 function attach(action) {
   streaming = true; setBusy(action);
   const st = $('#jobState'); st.className = 'state busy'; st.textContent = 'شغّال: ' + (ACTION_NAME[action] || action);
-  $('#log').textContent = '';
   const es = new EventSource(API + '/api/job/stream');
-  es.onmessage = (e) => logLine(JSON.parse(e.data).line);
+  es.onmessage = (e) => { const { line } = JSON.parse(e.data); if (/\bETA\b/.test(line)) logLine(line, true); };
   es.addEventListener('end', (e) => {
     const { code } = JSON.parse(e.data); es.close(); streaming = false; setBusy(null);
+    $('#log .stats')?.remove();
     st.className = 'state ' + (code === 0 ? 'ok' : code === 'missing' ? 'warn' : 'bad');
     st.textContent = code === 0 ? 'خلص تمام' : code === 'cancelled' ? 'اتوقف' : code === 'missing' ? 'خلص، بس فيه ملفات لسه مش على الدرايف' : 'خلص بمشكلة، بص على الشاشة';
-    if (!$('#log').textContent.trim()) logLine(code === 'cancelled' ? 'اتوقف قبل ما يخلص.' : action === 'pull' ? 'مفيش جديد.' : 'كله متطابق، مفيش حاجة ناقصة.');
     toast(code === 0 ? (ACTION_NAME[action] || action) + ': خلص' : code === 'cancelled' ? 'اتوقف' : code === 'missing' ? (action.startsWith('check') ? 'الماك والدرايف مختلفين، التفاصيل في الشاشة' : 'فيه ملفات لسه مترفعتش، شغّل الرفع تاني') : 'حصلت مشكلة');
     if (code === 0 && SET['look.confetti'] !== false) burst(document.querySelector(`[data-run="${action}"]`));
     load(); if (S?.waiting?.length) setTimeout(load, 3500);

@@ -82,7 +82,7 @@ function scan() {
     if (!sources.length && !Object.keys(outputs).length) return;
     const parts = rel.split(path.sep);
     const inUnsorted = parts[0] === 'unsorted';
-    const key = (inUnsorted ? parts.slice(1) : parts).join('/');
+    const key = (inUnsorted ? parts.slice(['Not summarized', 'summarized'].includes(parts[1]) ? 2 : 1) : parts).join('/');
     const sub = inUnsorted ? (['Not summarized', 'summarized'].includes(parts[1]) ? parts[2] || parts[1] : parts[1] || 'unsorted') : parts[0];
     const last = parts[parts.length - 1];
     const lecture = !CATS.has(key) && last !== 'Book' && parts.length > (inUnsorted ? 2 : 1) && !rel.includes('روابط وملفات عامة');
@@ -121,7 +121,7 @@ const ACTIONS = {
   runnow: { label: 'تشغيل الخطوات دلوقتي', drive: true, cmd: ['sh', ['-c', `sh "${path.join(KIT, 'inbox.sh')}"; echo "— رفع —"; sh "${path.join(KIT, 'push.sh')}"; echo "خلص"`]] },
   pushall: { label: 'رفع كل الجديد من الماك على الدرايف', drive: true, transfer: true, cmd: (mode) => ['rclone', ['copy', ROOT, REMOTE, ...tune(upFlags(), mode), ...chunk(mode), '--low-level-retries', '30', '-v', '--stats-one-line', '--stats', '15s']] },
   pullall: { label: 'تنزيل الجديد من الدرايف على الماك', drive: true, transfer: true, cmd: (mode) => ['rclone', ['copy', REMOTE, ROOT, '--ignore-existing', ...excludes(), ...tune(['--tpslimit', String(settings()['drive.tpslimit'] * 2), '--transfers', '4'], mode), '-v', '--stats-one-line', '--stats', '15s']] },
-  finish: { label: 'نقل اللي خلص من unsorted لفولدر المادة', drive: true, cmd: ['sh', [path.join(KIT, 'finish.sh')]] },
+  finish: { label: 'نقل اللي خلص لـ summarized', drive: true, cmd: ['sh', [path.join(KIT, 'finish.sh')]] },
   // read only: lists files that share a name inside the same Drive folder, changes nothing
   dupes: { label: 'دوّر على ملفات مكررة على الدرايف', cmd: ['rclone', ['dedupe', '--dedupe-mode', 'list', REMOTE, '--tpslimit', '2']] }, // read only
 };
@@ -188,6 +188,18 @@ const REMOTE_OF = (rel) => (rel ? `${REMOTE}/${rel}` : REMOTE);
 let job = null; // { id, action, lines[], done, code, clients:Set }
 
 let waiting = []; // commands asked for while another one runs; they start one after another
+// the dashboard's screen follows one file: the worker's log, plus every job's lines (rclone's progress is streamed apart)
+const FEED = path.join(LOGS, 'worker.log');
+function feed(line) { try { fs.appendFileSync(FEED, `${new Date().toISOString().slice(11, 19)} ${line}\n`); } catch {} }
+function liveFeed(from) {
+  const size = fs.statSync(FEED).size, start = from === null || from > size ? Math.max(0, size - 24000) : from;
+  const buf = Buffer.alloc(Math.min(size - start, 200000)), fd = fs.openSync(FEED, 'r');
+  fs.readSync(fd, buf, 0, buf.length, start); fs.closeSync(fd);
+  const end = buf.lastIndexOf(10) + 1; // only whole lines, so an Arabic letter is never cut in half
+  let lines = buf.subarray(0, end).toString('utf8').split('\n').filter((l) => l.trim());
+  if (from === null || from > size) lines = lines.slice(-80);
+  return { offset: start + end, lines };
+}
 function startJob(action, custom) {
   if (job && !job.done) {
     if (waiting.length >= settings()['safe.queueMax']) return { error: 'الطابور مليان، استنى شوية' };
@@ -204,12 +216,14 @@ function startJob(action, custom) {
   }
   job = { id: randomUUID(), action, label: a.label, lines: [], done: false, code: null, started: Date.now(), clients: new Set(), fixes: 0 };
   const j = job;
-  const push = (line) => { j.lines.push(line); if (j.lines.length > 2000) j.lines.splice(0, 500); for (const c of j.clients) c.write(`data: ${JSON.stringify({ line })}\n\n`); };
+  feed(`بدأ: ${a.label}`);
+  const push = (line) => { if (!/\bETA\b/.test(line)) feed(line); j.lines.push(line); if (j.lines.length > 2000) j.lines.splice(0, 500); for (const c of j.clients) c.write(`data: ${JSON.stringify({ line })}\n\n`); };
   const finish = (code) => {
     clearInterval(j.guard);
     j.done = true; j.code = j.cancelled ? 'cancelled' : code;
     // the copy+check commands end with exit 0 even when the check finds files still missing on Drive
     if (j.code === 0 && j.lines.some((l) => /\b[1-9]\d* differences found|file not in Google drive|^فيه \d+ اختلاف/.test(l))) j.code = 'missing';
+    feed(`${j.code === 0 ? 'خلص' : j.code === 'cancelled' ? 'اتوقف' : j.code === 'missing' ? 'خلص وفيه اختلافات' : 'خلص بمشكلة'}: ${a.label}`);
     if (a.drive || a.transfer) setTimeout(() => driveIndex(true), 1500);
     logAction({ type: 'job', action, label: a.label, code: j.code, fixes: j.fixes, secs: Math.round((Date.now() - j.started) / 1000), tail: j.lines.slice(-6) });
     for (const c of j.clients) { c.write(`event: end\ndata: ${JSON.stringify({ code: j.code })}\n\n`); c.end(); }
@@ -473,6 +487,11 @@ http.createServer(async (req, res) => {
       for (const f of bad) fs.renameSync(path.join(DOWNLOADS, f.name), path.join(dir, fs.existsSync(path.join(dir, f.name)) ? `${Date.now()}-${f.name}` : f.name));
       logAction({ type: 'downloads-trash', files: bad.length }); return send(res, 200, { moved: bad.length });
     }
+    if (r === '/api/live') {
+      let worker = {}; try { worker = JSON.parse(fs.readFileSync(path.join(WORKER, 'status.json'), 'utf8')); } catch {}
+      const from = u.searchParams.get('from');
+      return send(res, 200, { ...liveFeed(from === null ? null : Number(from)), worker: { state: worker.state, step: worker.step } });
+    }
     if (r === '/api/worker' && req.method === 'GET') {
       const st = jread(WSTATUS, {}); const alive = Date.now() - Date.parse(st.at || 0) < 120e3 || st.state === 'working';
       return send(res, 200, { status: st, alive, tasks: jread(WTASKS, []).slice(-30).reverse() });
@@ -589,7 +608,7 @@ http.createServer(async (req, res) => {
       const dest = u.searchParams.get('dest') || '';
       const name = path.basename(u.searchParams.get('name') || '');
       if (!name || name.startsWith('.')) return send(res, 400, { error: 'اسم ملف مش صالح' });
-      const dir = safePath(path.join('unsorted', dest));
+      const dir = safePath(path.join('unsorted', /^(Not summarized|summarized)(\/|$)/.test(dest) ? dest : path.join('Not summarized', dest)));
       if (!dir.startsWith(UNSORTED)) return send(res, 400, { error: 'الرفع جوه unsorted بس' });
       fs.mkdirSync(dir, { recursive: true });
       let target = path.join(dir, name);
