@@ -1074,27 +1074,15 @@ $('#moreSheet').addEventListener('click', (e) => { if (e.target === e.currentTar
 const markMore = () => { const r = (location.hash.match(/^#\/(\w+)/) || [])[1]; $('#moreBtn').classList.toggle('on', MORE.includes(r)); $$('#moreLinks a').forEach((a) => a.classList.toggle('on', a.dataset.route === r)); };
 addEventListener('hashchange', markMore); markMore();
 
-// the footer is an end credit: the name draws itself when it scrolls into view, then a light travels across it
+// the footer credit opens from its M into the full capsule when it scrolls into view
 (function credit() {
-  const box = $('#credit'), spot = $('#crSpot'), word = box.querySelector('svg'), btn = box.querySelector('.cr-btn'), roles = [...box.querySelectorAll('.cr-roles span')];
-  const V = word.viewBox.baseVal; let role = 0; roles[0].classList.add('on');
-  const place = (x, y) => { spot.setAttribute('cx', x); spot.setAttribute('cy', y); box.style.setProperty('--sx', `${(x - V.x) / V.width * 100}%`); };
+  const box = $('#credit');
   if (reduced) return;
   box.classList.add('ready');
-  let pointer = null, visible = false, raf;
-  function light(t) { if (pointer) place(pointer.x, pointer.y); else place(V.x + V.width * (.5 + .44 * Math.sin(t / 2600)), V.y + V.height * (.5 + .22 * Math.cos(t / 1700))); if (visible) raf = requestAnimationFrame(light); }
   new IntersectionObserver((es) => {
-    visible = es[0].isIntersecting; cancelAnimationFrame(raf);
-    if (!visible) return;
-    box.classList.remove('play'); void box.offsetWidth; box.classList.add('play'); raf = requestAnimationFrame(light);
-  }, { threshold: .35 }).observe(box);
-  box.addEventListener('pointermove', (e) => {
-    const r = word.getBoundingClientRect(); pointer = { x: V.x + (e.clientX - r.left) / r.width * V.width, y: V.y + (e.clientY - r.top) / r.height * V.height };
-    const b = btn.getBoundingClientRect(), dx = e.clientX - (b.left + b.width / 2), dy = e.clientY - (b.top + b.height / 2), near = e.pointerType === 'mouse' && Math.hypot(dx, dy) < 110;
-    btn.style.transform = near ? `translate(${dx * .22}px, ${dy * .3}px)` : '';
-  });
-  box.addEventListener('pointerleave', () => { pointer = null; btn.style.transform = ''; });
-  setInterval(() => { if (!visible) return; roles[role].classList.remove('on'); role = (role + 1) % roles.length; roles[role].classList.add('on'); }, 2400);
+    if (!es[0].isIntersecting) return;
+    box.classList.remove('play'); void box.offsetWidth; box.classList.add('play');
+  }, { threshold: .6 }).observe(box);
 })();
 
 // cards rise into place as they scroll into view, on every page
