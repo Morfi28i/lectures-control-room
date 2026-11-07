@@ -336,8 +336,17 @@ function setBusy(action) {
   $('#cancelJob').hidden = !action;
   $('#jobPill').hidden = !action; if (action) $('#jobPillText').textContent = ACTION_NAME[action] || action;
 }
+// rclone stats read in MB; only amounts under 100 KB stay in KB
+const IN_KB = { B: 1 / 1024, KiB: 1, MiB: 1024, GiB: 1048576 };
+function readableStats(line) {
+  if (!/ETA/.test(line)) return line;
+  return line.replace(/([\d.]+)\s*(GiB|MiB|KiB|B)(\/s)?/g, (_, n, unit, rate = '') => {
+    const kb = n * IN_KB[unit];
+    return kb < 100 ? `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB${rate}` : `${(kb / 1024).toFixed(2)} MB${rate}`;
+  });
+}
 function logLine(text) {
-  const el = document.createElement('span'); el.className = 'l'; el.textContent = text;
+  const el = document.createElement('span'); el.className = 'l'; el.textContent = readableStats(text);
   $('#log').append(el); $('#log').scrollTop = $('#log').scrollHeight;
 }
 function attach(action) {
