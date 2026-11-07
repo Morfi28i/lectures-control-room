@@ -115,8 +115,9 @@ const ACTIONS = {
   pull: { label: 'سحب الجديد من الدرايف وترتيبه', cmd: ['sh', [path.join(KIT, 'inbox.sh')]] },
   // same job as push.sh (copy unsorted up, then check), run directly so the speed guard can see rclone's stats
   push: { label: 'رفع الجديد على الدرايف', transfer: true, cmd: (mode) => ['sh', ['-c', 'L="$1"; R="$2"; shift 2; rclone copy "$L" "$R" "$@"; echo "— فحص —"; rclone check "$L" "$R" --one-way --size-only --exclude .DS_Store 2>&1 | grep -E "differences|ERROR"', 'sh', UNSORTED, `${REMOTE}/unsorted`, ...tune(upFlags(), mode), '--drive-chunk-size', mode === 'chunks' ? '64M' : '16M', '-v', '--stats-one-line', '--stats', '15s']] },
-  check: { label: 'فحص تطابق الدرايف', cmd: ['rclone', ['check', UNSORTED, 'gdfull:1st Physics Group (B)/unsorted', '--one-way', '--exclude', '.DS_Store']] },
-  checkall: { label: 'فحص تطابق كل المحاضرات', cmd: ['rclone', ['check', ROOT, 'gdfull:1st Physics Group (B)', '--one-way', '--exclude', '.DS_Store', '--exclude', '*.md']] },
+  // both directions, so a file that exists only on Drive shows up too
+  check: { label: 'فحص تطابق الماك والدرايف', cmd: ['sh', [path.join(KIT, 'check.sh'), UNSORTED, `${REMOTE}/unsorted`]] },
+  checkall: { label: 'فحص تطابق كل المحاضرات', cmd: ['sh', [path.join(KIT, 'check.sh'), ROOT, REMOTE, '--exclude', '*.md']] },
   runnow: { label: 'تشغيل الخطوات دلوقتي', drive: true, cmd: ['sh', ['-c', `sh "${path.join(KIT, 'inbox.sh')}"; echo "— رفع —"; sh "${path.join(KIT, 'push.sh')}"; echo "خلص"`]] },
   pushall: { label: 'رفع كل الجديد من الماك على الدرايف', drive: true, transfer: true, cmd: (mode) => ['rclone', ['copy', ROOT, REMOTE, ...tune(upFlags(), mode), ...chunk(mode), '--low-level-retries', '30', '-v', '--stats-one-line', '--stats', '15s']] },
   pullall: { label: 'تنزيل الجديد من الدرايف على الماك', drive: true, transfer: true, cmd: (mode) => ['rclone', ['copy', REMOTE, ROOT, '--ignore-existing', ...excludes(), ...tune(['--tpslimit', String(settings()['drive.tpslimit'] * 2), '--transfers', '4'], mode), '-v', '--stats-one-line', '--stats', '15s']] },
@@ -208,7 +209,7 @@ function startJob(action, custom) {
     clearInterval(j.guard);
     j.done = true; j.code = j.cancelled ? 'cancelled' : code;
     // the copy+check commands end with exit 0 even when the check finds files still missing on Drive
-    if (j.code === 0 && j.lines.some((l) => /\b[1-9]\d* differences found|file not in Google drive/.test(l))) j.code = 'missing';
+    if (j.code === 0 && j.lines.some((l) => /\b[1-9]\d* differences found|file not in Google drive|^فيه \d+ اختلاف/.test(l))) j.code = 'missing';
     if (a.drive || a.transfer) setTimeout(() => driveIndex(true), 1500);
     logAction({ type: 'job', action, label: a.label, code: j.code, fixes: j.fixes, secs: Math.round((Date.now() - j.started) / 1000), tail: j.lines.slice(-6) });
     for (const c of j.clients) { c.write(`event: end\ndata: ${JSON.stringify({ code: j.code })}\n\n`); c.end(); }

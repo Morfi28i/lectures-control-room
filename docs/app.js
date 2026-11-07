@@ -360,7 +360,7 @@ function attach(action) {
     st.className = 'state ' + (code === 0 ? 'ok' : code === 'missing' ? 'warn' : 'bad');
     st.textContent = code === 0 ? 'خلص تمام' : code === 'cancelled' ? 'اتوقف' : code === 'missing' ? 'خلص، بس فيه ملفات لسه مش على الدرايف' : 'خلص بمشكلة، بص على الشاشة';
     if (!$('#log').textContent.trim()) logLine(code === 'cancelled' ? 'اتوقف قبل ما يخلص.' : action === 'pull' ? 'مفيش جديد.' : 'كله متطابق، مفيش حاجة ناقصة.');
-    toast(code === 0 ? (ACTION_NAME[action] || action) + ': خلص' : code === 'cancelled' ? 'اتوقف' : code === 'missing' ? 'فيه ملفات لسه مترفعتش، شغّل الرفع تاني' : 'حصلت مشكلة');
+    toast(code === 0 ? (ACTION_NAME[action] || action) + ': خلص' : code === 'cancelled' ? 'اتوقف' : code === 'missing' ? (action.startsWith('check') ? 'الماك والدرايف مختلفين، التفاصيل في الشاشة' : 'فيه ملفات لسه مترفعتش، شغّل الرفع تاني') : 'حصلت مشكلة');
     if (code === 0 && SET['look.confetti'] !== false) burst(document.querySelector(`[data-run="${action}"]`));
     load(); if (S?.waiting?.length) setTimeout(load, 3500);
   });
