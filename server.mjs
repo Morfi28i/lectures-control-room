@@ -117,10 +117,10 @@ const logAction = (o) => rotate(path.join(LOGS, 'actions.jsonl')) || fs.appendFi
 const ACTIONS = {
   pull: { label: 'سحب الجديد من الدرايف وترتيبه', cmd: ['sh', [path.join(KIT, 'inbox.sh')]] },
   // same job as push.sh (copy unsorted up, then check), run directly so the speed guard can see rclone's stats
-  push: { label: 'رفع الجديد على الدرايف', transfer: true, cmd: (mode) => ['sh', ['-c', 'L="$1"; R="$2"; shift 2; rclone copy "$L" "$R" "$@"; echo "— فحص —"; rclone check "$L" "$R" --one-way --size-only --exclude .DS_Store 2>&1 | grep -E "differences|ERROR"', 'sh', UNSORTED, `${REMOTE}/unsorted`, ...tune(upFlags(), mode), '--drive-chunk-size', mode === 'chunks' ? '64M' : '16M', '-v', '--stats-one-line', '--stats', '15s']] },
+  push: { label: 'رفع الجديد على الدرايف', transfer: true, cmd: (mode) => ['sh', ['-c', 'L="$1"; R="$2"; shift 2; rclone copy "$L" "$R" "$@"; echo "— فحص —"; rclone check "$L" "$R" --one-way --size-only --exclude .DS_Store 2>&1 | grep -E "differences|ERROR"', 'sh', UNSORTED, `${REMOTE}/unsorted`, ...tune(upFlags('unsorted'), mode), '--drive-chunk-size', mode === 'chunks' ? '64M' : '16M', '-v', '--stats-one-line', '--stats', '15s']] },
   // both directions, so a file that exists only on Drive shows up too
-  check: { label: 'فحص تطابق الماك والدرايف', cmd: ['sh', [path.join(KIT, 'check.sh'), UNSORTED, `${REMOTE}/unsorted`]] },
-  checkall: { label: 'فحص تطابق كل المحاضرات', cmd: ['sh', [path.join(KIT, 'check.sh'), ROOT, REMOTE, '--exclude', '*.md']] },
+  check: { label: 'فحص تطابق الماك والدرايف', cmd: () => ['sh', [path.join(KIT, 'check.sh'), UNSORTED, `${REMOTE}/unsorted`, ...exceptionFlags('unsorted')]] },
+  checkall: { label: 'فحص تطابق كل المحاضرات', cmd: () => ['sh', [path.join(KIT, 'check.sh'), ROOT, REMOTE, '--exclude', '*.md', ...exceptionFlags()]] },
   runnow: { label: 'تشغيل الخطوات دلوقتي', drive: true, cmd: ['sh', ['-c', `sh "${path.join(KIT, 'inbox.sh')}"; echo "— رفع —"; sh "${path.join(KIT, 'push.sh')}"; echo "خلص"`]] },
   pushall: { label: 'رفع كل الجديد من الماك على الدرايف', drive: true, transfer: true, cmd: (mode) => ['rclone', ['copy', ROOT, REMOTE, ...tune(upFlags(), mode), ...chunk(mode), '--low-level-retries', '30', '-v', '--stats-one-line', '--stats', '15s']] },
   pullall: { label: 'تنزيل الجديد من الدرايف على الماك', drive: true, transfer: true, cmd: (mode) => ['rclone', ['copy', REMOTE, ROOT, '--ignore-existing', ...excludes(), ...tune(['--tpslimit', String(settings()['drive.tpslimit'] * 2), '--transfers', '4'], mode), '-v', '--stats-one-line', '--stats', '15s']] },
@@ -130,8 +130,17 @@ const ACTIONS = {
 };
 // commands that write to Drive or the Mac's lecture folders; two of them at once can make duplicate files on Drive
 // rclone flags from the «الدرايف والمزامنة» settings
-const excludes = () => settings()['drive.exclude'].flatMap((x) => ['--exclude', x]);
-const upFlags = () => { const S = settings(); return [...(S['drive.newerWins'] ? ['--update'] : []), ...excludes(), '--tpslimit', String(S['drive.tpslimit']), '--transfers', String(S['drive.transfers']), '--retries', String(S['drive.retries'])]; };
+// exceptions: paths kept out of syncing, out of the worker's hands and safe from deleting
+const exceptions = () => settings()['ex.list'] || [];
+const isExcepted = (rel) => exceptions().some((x) => rel === x || rel.startsWith(`${x}/`));
+const rcloneGlob = (s) => s.replace(/[\\*?[\]{}]/g, '\\$&');
+const exceptionPatterns = (base = '') => exceptions().filter((x) => !base || x.startsWith(`${base}/`)).flatMap((x) => { const g = rcloneGlob(base ? x.slice(base.length + 1) : x); return [`/${g}`, `/${g}/**`]; });
+const exceptionFlags = (base) => exceptionPatterns(base).flatMap((x) => ['--exclude', x]);
+// the shell scripts and the worker read these two files
+function writeExceptions() { fs.writeFileSync(path.join(KIT, 'exceptions.list'), exceptions().map((x) => `${x}\n`).join('')); fs.writeFileSync(path.join(KIT, 'exceptions-unsorted.filter'), exceptionPatterns('unsorted').map((x) => `- ${x}\n`).join('')); }
+writeExceptions();
+const excludes = (base) => [...settings()['drive.exclude'].flatMap((x) => ['--exclude', x]), ...exceptionFlags(base)];
+const upFlags = (base) => { const S = settings(); return [...(S['drive.newerWins'] ? ['--update'] : []), ...excludes(base), '--tpslimit', String(S['drive.tpslimit']), '--transfers', String(S['drive.transfers']), '--retries', String(S['drive.retries'])]; };
 // speed-guard variants of a transfer: normal, gentle (one file at a time, slow request rate), chunks (bigger upload pieces)
 function tune(args, mode) {
   const a = [...args], set = (flag, v) => { const i = a.indexOf(flag); if (i >= 0) a[i + 1] = v; else a.push(flag, v); };
@@ -328,21 +337,25 @@ function localFiles() {
   })(ROOT);
   return out;
 }
+const DELETED = path.join(LOGS, 'deleted.jsonl');
+const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
+const rclone = (args) => new Promise((res) => { const p = spawn('rclone', args, { env: ENV }); let out = ''; p.stdout.on('data', (d) => (out += d)); p.on('close', (code) => res({ code, out })); });
 function syncState() {
   driveIndex();
-  const local = localFiles(), status = {}, lists = { local: [], drive: [], diff: [] };
+  const local = localFiles(), status = {}, sizes = {}, lists = { local: [], drive: [], diff: [], both: [], except: [] };
   let both = 0;
   if (drive.files) {
     for (const [rel, size] of Object.entries(local)) {
-      const d = drive.files[rel];
+      const d = drive.files[rel]; sizes[rel] = size;
+      if (isExcepted(rel)) { status[rel] = 'except'; lists.except.push(rel); continue; }
       if (!d) { status[rel] = 'local'; lists.local.push(rel); }
       else if (d.size !== size && !rel.endsWith('.md')) { status[rel] = 'diff'; lists.diff.push(rel); }
-      else { status[rel] = 'both'; both++; }
+      else { status[rel] = 'both'; lists.both.push(rel); both++; }
     }
-    for (const rel of Object.keys(drive.files)) if (!(rel in local)) { status[rel] = 'drive'; lists.drive.push(rel); }
+    for (const [rel, f] of Object.entries(drive.files)) if (!(rel in local)) { sizes[rel] = f.size; if (isExcepted(rel)) { status[rel] = 'except'; lists.except.push(rel); } else { status[rel] = 'drive'; lists.drive.push(rel); } }
   }
   const ids = {}; if (drive.files) for (const [rel, f] of Object.entries(drive.files)) ids[rel] = f.id;
-  return { at: drive.at, indexing: drive.indexing, ready: !!drive.files, error: drive.error, counts: { both, local: lists.local.length, drive: lists.drive.length, diff: lists.diff.length }, lists, status, ids, dirs: drive.dirs, auto: fs.existsSync(AUTOSYNC) };
+  return { at: drive.at, indexing: drive.indexing, ready: !!drive.files, error: drive.error, counts: { both, local: lists.local.length, drive: lists.drive.length, diff: lists.diff.length }, lists, status, sizes, exceptions: exceptions(), ids, dirs: drive.dirs, auto: fs.existsSync(AUTOSYNC) };
 }
 // auto sync: every drive.autosyncMinutes, push anything that exists only on the Mac (when switched on)
 let lastAutosync = Date.now();
@@ -463,8 +476,8 @@ http.createServer(async (req, res) => {
       const name = relN.split(path.sep).pop() || 'كل الفولدرات';
       const STATS = ['-v', '--stats-one-line', '--stats', '15s'];
       const cmd = (mode) => dir === 'down'
-        ? ['rclone', ['copy', REMOTE_OF(relN), p, '--ignore-existing', ...excludes(), ...tune([], mode), ...STATS]]
-        : ['rclone', ['copy', p, REMOTE_OF(relN), ...tune(upFlags(), mode), ...chunk(mode), ...STATS]];
+        ? ['rclone', ['copy', REMOTE_OF(relN), p, '--ignore-existing', ...excludes(relN), ...tune([], mode), ...STATS]]
+        : ['rclone', ['copy', p, REMOTE_OF(relN), ...tune(upFlags(relN), mode), ...chunk(mode), ...STATS]];
       const out = startJob(dir === 'down' ? 'down' : 'up', { label: (dir === 'down' ? 'تنزيل ' : 'رفع ') + name, drive: true, transfer: true, cmd });
       return send(res, out.error ? 409 : 200, out);
     }
@@ -475,6 +488,59 @@ http.createServer(async (req, res) => {
       const cmd = (mode) => dir === 'down' ? ['rclone', ['copyto', REMOTE_OF(relN), p, ...tune([], mode), ...STATS]] : ['rclone', ['copyto', p, REMOTE_OF(relN), ...tune(upFlags(), mode), ...chunk(mode), ...STATS]];
       const out = startJob(dir === 'down' ? 'down' : 'up', { label: (dir === 'down' ? 'تنزيل ' : 'رفع ') + path.basename(relN), drive: true, transfer: true, cmd });
       return send(res, out.error ? 409 : 200, out);
+    }
+    if (r === '/api/except' && req.method === 'POST') {
+      const { items, on } = JSON.parse(await body(req));
+      const rels = items.map((x) => path.relative(ROOT, safePath(x))).filter(Boolean);
+      const list = on ? [...new Set([...exceptions(), ...rels])] : exceptions().filter((x) => !rels.includes(x));
+      saveSettings({ values: { 'ex.list': list } }); writeExceptions();
+      logAction({ type: 'except', on: !!on, rel: rels.join('، ').slice(0, 200) });
+      return send(res, 200, { exceptions: list, sync: syncState() });
+    }
+    if (r === '/api/deleted') return send(res, 200, { items: readJSONL(DELETED, 100).filter((d) => !d.restored && Date.now() - Date.parse(d.at) < settings()['worker.keepDays'] * 864e5).reverse() });
+    if (r === '/api/deleted/restore' && req.method === 'POST') {
+      const { id } = JSON.parse(await body(req)), all = readJSONL(DELETED, 1000), d = all.find((x) => x.id === id);
+      if (!d) return send(res, 404, { error: 'مش لاقي الملف ده في القايمة' });
+      if (!d.macPath) return send(res, 200, { driveTrash: true });
+      const dest = safePath(d.rel);
+      if (fs.existsSync(dest)) return send(res, 409, { error: 'فيه ملف بنفس الاسم في نفس المكان' });
+      try { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.renameSync(d.macPath, dest); } catch (e) { return send(res, 500, { error: `مقدرتش أرجّعه من الـ Trash، رجّعه منها بإيدك (${e.code})` }); }
+      let uploaded = true;
+      if (d.where === 'both') uploaded = (await rclone([fs.statSync(dest).isDirectory() ? 'copy' : 'copyto', dest, REMOTE_OF(d.rel), '--tpslimit', '1'])).code === 0;
+      d.restored = true; fs.writeFileSync(DELETED, all.map((x) => JSON.stringify(x)).join('\n') + '\n');
+      logAction({ type: 'restore', rel: d.rel }); driveIndex(true);
+      return send(res, 200, { restored: true, uploaded });
+    }
+    if (r === '/api/delete' && req.method === 'POST') {
+      const { items, where } = JSON.parse(await body(req));
+      if (!Array.isArray(items) || !items.length || items.length > 200 || !['mac', 'drive', 'both'].includes(where)) return send(res, 400, { error: 'طلب مسح مش صالح' });
+      if ((job && !job.done) || procs().rclone.length) return send(res, 409, { error: 'فيه رفع أو تنزيل شغال، استنى لما يخلص' });
+      const busy = readJSON(path.join(WORKER, 'tasks.json'), []).filter((t) => ['working', 'waiting', 'later'].includes(t.status)).map((t) => t.rel), CATS = cats(), done = [], failed = [];
+      for (const item of items) {
+        const relN = path.relative(ROOT, safePath(item)), plain = relN.replace(/^unsorted\/?/, '').replace(/^(Not summarized|summarized)\/?/, '');
+        if (!relN || !plain || CATS.has(plain)) { failed.push({ rel: relN, why: 'ده فولدر مادة أو تفرع أساسي' }); continue; }
+        if (isExcepted(relN)) { failed.push({ rel: relN, why: 'مستثنى' }); continue; }
+        if (busy.some((b) => relN === b || relN.startsWith(`${b}/`) || b.startsWith(`${relN}/`))) { failed.push({ rel: relN, why: 'العامل شغال عليه' }); continue; }
+        const rec = { id: randomUUID(), at: new Date().toISOString(), rel: relN, where, size: 0 }, full = safePath(relN);
+        // Drive first: if it fails, the Mac copy is still there
+        if (where !== 'mac') {
+          const stat = await rclone(['lsjson', '--stat', REMOTE_OF(relN)]);
+          if (stat.code === 0 && stat.out.trim()) {
+            const info = JSON.parse(stat.out); rec.size = info.Size > 0 ? info.Size : 0;
+            const del = info.IsDir ? await rclone(['delete', REMOTE_OF(relN), '--drive-use-trash=true', '--tpslimit', '2']) : await rclone(['deletefile', REMOTE_OF(relN), '--drive-use-trash=true']);
+            if (del.code !== 0) { failed.push({ rel: relN, why: 'الدرايف رفض المسح' }); continue; }
+            if (info.IsDir) await rclone(['rmdirs', REMOTE_OF(relN), '--tpslimit', '2']);
+          }
+        }
+        if (where !== 'drive' && fs.existsSync(full)) {
+          const dir = path.join(os.homedir(), '.Trash', `lectures-deleted-${rec.at.slice(0, 10)}`);
+          try { fs.mkdirSync(dir, { recursive: true }); rec.macPath = path.join(dir, `${Date.now()}-${path.basename(full)}`); fs.renameSync(full, rec.macPath); }
+          catch (e) { delete rec.macPath; failed.push({ rel: relN, why: `الماك رفض المسح (${e.code})` }); continue; }
+        }
+        fs.appendFileSync(DELETED, `${JSON.stringify(rec)}\n`); feed(`اتمسح: ${relN}`); logAction({ type: 'delete', where, rel: relN }); done.push(rec);
+      }
+      driveIndex(true);
+      return send(res, 200, { done, failed });
     }
     if (r === '/api/autosync' && req.method === 'POST') {
       const { on } = JSON.parse(await body(req));
@@ -525,7 +591,7 @@ http.createServer(async (req, res) => {
     if (r === '/api/settings' && req.method === 'POST') {
       // {values:{key:value}} saves, {reset:[keys]} goes back to defaults, {replace:true, values} is an import
       const inp = JSON.parse(await body(req));
-      try { const v = saveSettings(inp); logAction({ type: 'settings', keys: [...Object.keys(inp.values || {}), ...(inp.reset || [])].slice(0, 20) }); return send(res, 200, { values: v }); }
+      try { const v = saveSettings(inp); writeExceptions(); logAction({ type: 'settings', keys: [...Object.keys(inp.values || {}), ...(inp.reset || [])].slice(0, 20) }); return send(res, 200, { values: v }); }
       catch (e) { return send(res, 400, { error: e.message }); }
     }
     if (r === '/api/accounts' && req.method === 'GET') return send(res, 200, accounts());

@@ -961,3 +961,28 @@ dialog.sheet[open] { transform: none; }
 .splash .welcome p { margin: 0; font-size: clamp(1rem, 2.6vw, 1.25rem); font-weight: 400; line-height: 1.7; color: var(--ink); animation: none; }
 .welcome p span { display: inline-block; white-space: pre; animation: rise .5s calc(.35s + var(--i) * .07s) var(--ease) both; }
 .welcome small { color: var(--acc); font-size: .9rem; animation: fadein .8s 1.3s ease both; }
+
+/* deleting and exceptions in the sync page */
+.synclist li { align-items: center; }
+.sync-pick { flex: none; width: 1rem; height: 1rem; accent-color: var(--acc); }
+.synclist li > div { flex: 1; min-width: 0; }
+.sync-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .7rem 0 .3rem; padding: .5rem .7rem; border-radius: 10px; background: var(--panel-2); animation: rise .3s var(--ease) both; }
+.sync-bulk[hidden] { display: none; }
+.sync-bulk span { margin-inline-end: auto; font-size: .85rem; }
+.btn.danger { color: var(--play); }
+.btn.danger:hover { border-color: var(--play); }
+.btn.danger-solid { background: var(--play); color: #fff; border-color: transparent; }
+dialog.del-dialog { width: min(460px, 92vw); padding: 1.2rem; }
+dialog.del-dialog h2 { margin: 0 0 .6rem; }
+#delNames { margin: 0 0 .8rem; padding-inline-start: 1.1rem; color: var(--muted); font-size: .85rem; overflow-wrap: anywhere; }
+#delWhere { display: grid; gap: .35rem; margin: 0 0 .7rem; padding: 0; border: 0; }
+#delWhere legend { margin-bottom: .35rem; font-weight: 500; }
+#delWhere label, .del-keep { display: flex; align-items: center; gap: .5rem; font-size: .88rem; }
+#delWhere input:disabled + span { opacity: .4; }
+.del-keep[hidden] { display: none; }
+.del-dialog .row-actions { justify-content: flex-end; margin-top: .8rem; }
+@media (max-width: 640px) {
+  .synclist li { flex-wrap: wrap; row-gap: .5rem; }
+  .synclist li > div { flex-basis: calc(100% - 2rem); }
+  .synclist li > .row-actions { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+}

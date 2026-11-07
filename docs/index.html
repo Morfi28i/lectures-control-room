@@ -244,8 +244,18 @@
               <button class="chip on" data-l="local">على الماك بس</button>
               <button class="chip" data-l="drive">على الدرايف بس</button>
               <button class="chip" data-l="diff">الحجم مختلف</button>
+              <button class="chip" data-l="both">على الاتنين</button>
+              <button class="chip" data-l="except">المستثناة</button>
+              <button class="chip" data-l="deleted">اللي اتمسح</button>
             </div>
             <input type="search" id="syncQ" placeholder="دوّر على ملف…" aria-label="بحث في الملفات">
+          </div>
+          <div class="sync-bulk" id="syncBulk" hidden>
+            <span id="syncPicked"></span>
+            <button class="btn ghost small" id="syncAll">حدد الكل</button>
+            <button class="btn ghost small" id="syncExcept">استثني</button>
+            <button class="btn ghost small danger" id="syncDelete">امسح</button>
+            <button class="btn ghost small" id="syncClear">الغي التحديد</button>
           </div>
           <ul class="list synclist" id="syncList"></ul>
         </div>
@@ -425,7 +435,22 @@
     <button class="btn ghost" id="dUp">ارفع الفولدر على الدرايف</button>
     <button class="btn ghost" id="dDown">نزّل الناقص من الدرايف</button>
     <a class="btn ghost" id="dDrive" target="_blank" rel="noopener">افتحه في Drive</a>
+    <button class="btn ghost" id="dExcept">استثنيها</button>
+    <button class="btn ghost danger" id="dDelete">امسحها</button>
   </div>
+</dialog>
+
+<dialog class="help del-dialog" id="delDlg" aria-labelledby="delTitle">
+  <h2 id="delTitle"></h2>
+  <ul id="delNames"></ul>
+  <fieldset id="delWhere"><legend>تتمسح منين؟</legend>
+    <label><input type="radio" name="delWhere" value="both"><span>الماك والدرايف</span></label>
+    <label><input type="radio" name="delWhere" value="mac"><span>الماك بس</span></label>
+    <label><input type="radio" name="delWhere" value="drive"><span>الدرايف بس</span></label>
+  </fieldset>
+  <label class="del-keep" id="delKeepRow"><input type="checkbox" id="delKeep"><span>متزامنهاش تاني، عشان المزامنة ترجّعهاش من الناحية التانية</span></label>
+  <p class="muted small">بتروح الـ Trash مش مسح نهائي. من الماك تقدر ترجّعها من «اللي اتمسح»، ومن الدرايف من سلة Google Drive.</p>
+  <div class="row-actions"><button class="btn ghost" id="delCancel">الغي</button><button class="btn danger-solid" id="delGo">امسح</button></div>
 </dialog>
 
 <div class="toast" id="toast" role="status"><span id="toastMsg"></span><button id="toastAct" hidden></button></div>

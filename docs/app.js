@@ -320,6 +320,7 @@ function renderHistory() {
       t: a.type === 'job' ? `${ACTION_NAME[a.action] || a.action}${a.code === 0 ? '' : a.code === 'cancelled' ? ' (اتوقف)' : a.code === 'missing' ? ' (فيه ملفات ناقصة)' : ' (فيه مشكلة)'}`
         : a.type === 'upload' ? 'ملف اتضاف' : a.type === 'queue' ? 'طلب جديد' : a.type === 'rules' ? 'الثوابت اتعدّلت'
         : a.type === 'autopilot' ? (a.paused ? 'الطيار الآلي وقف' : 'الطيار الآلي اشتغل')
+        : a.type === 'delete' ? 'اتمسح' : a.type === 'restore' ? 'اترجّع من الـ Trash' : a.type === 'except' ? (a.on ? 'اتضاف استثناء' : 'اتشال استثناء')
         : a.type === 'autosync' ? 'مزامنة تلقائية بدأت' : a.type === 'autosync-set' ? (a.on ? 'المزامنة التلقائية اشتغلت' : 'المزامنة التلقائية وقفت')
         : a.type === 'account' ? `أكونت ${a.email || a.n}: ${a.limited ? 'وصل للحد' : 'رجع متاح'}` : a.type === 'account-onoff' ? `أكونت ${a.email}: ${a.on ? 'اتفتح للعامل' : 'اتقفل للعامل'}` : a.type === 'zen-restart' ? 'العامل أعاد فتح Zen' : a.type === 'renamed' ? `اتسمّى: ${a.to}` : a.type === 'settings' ? 'التخصيص اتغيّر' : a.type === 'make' ? 'طلب سلايدز من العامل' : a.type === 'worker-run' ? 'العامل اشتغل دلوقتي' : a.type === 'downloads-trash' ? 'تنزيلات بايظة راحت الـ Trash' : a.type,
       d: a.file || a.rel || (a.files ? `${ar.format(a.files)} ملف` : '') || (a.tail || []).slice(-2).join(' / '),
@@ -876,6 +877,72 @@ function syncBadge() { const n = SY?.ready ? SY.counts.local + SY.counts.drive +
 async function runSync(url, body, action) {
   try { const r = await api(url, { method: 'POST', body: JSON.stringify(body) }); location.hash = '#/home'; if (r.queued) { toast(`اتحط في الطابور، رقمه ${ar.format(r.position)}`); load(); } else attach(action); } catch (e) { toast(e.message); }
 }
+// ---------- deleting and exceptions ----------
+const syncPicked = new Set(), fmtSize = (b) => b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
+function renderBulk() {
+  const n = syncPicked.size; $('#syncBulk').hidden = !n || ['deleted', 'except'].includes(syncList);
+  $('#syncPicked').textContent = `${ar.format(n)} متحدد`;
+}
+function renderExcepted(q) {
+  const rows = (SY.exceptions || []).filter((r) => !q || r.toLowerCase().includes(q));
+  $('#syncList').innerHTML = rows.length ? rows.map((r, n) => `<li style="--i:${Math.min(n, 25)}"><div><b>${esc(r.split('/').pop())}</b><small>${esc(r.split('/').slice(0, -1).join(' / '))}</small></div><span class="row-actions"><button class="btn ghost small" data-sunex="${esc(r)}">شيل الاستثناء</button></span></li>`).join('')
+    : `<li class="empty-state">${EMPTY}<span>مفيش استثناءات. أي ملف تستثنيه مش هيتزامن، والعامل مش هيلمسه، ومش هيتمسح.</span></li>`;
+}
+async function renderDeleted(q) {
+  const { items } = await api('/api/deleted'), rows = items.filter((d) => !q || d.rel.toLowerCase().includes(q)), WHERE = { mac: 'من الماك', drive: 'من الدرايف', both: 'من الماك والدرايف' };
+  if (syncList !== 'deleted') return;
+  $('#syncList').innerHTML = rows.length ? rows.map((d, n) => `<li style="--i:${Math.min(n, 25)}"><div><b>${esc(d.rel.split('/').pop())}</b><small>${WHERE[d.where]} · ${dayTime.format(new Date(d.at))}</small></div><span class="row-actions">${d.macPath ? `<button class="btn ghost small" data-srestore="${d.id}">رجّعه</button>` : '<a class="btn ghost small" href="https://drive.google.com/drive/trash" target="_blank" rel="noopener">سلة الدرايف</a>'}</span></li>`).join('')
+    : `<li class="empty-state">${EMPTY}<span>مفيش حاجة اتمسحت في آخر ${ar.format(SET['worker.keepDays'] || 7)} أيام.</span></li>`;
+}
+async function setExcepted(items, on) {
+  const r = await api('/api/except', { method: 'POST', body: JSON.stringify({ items, on }) }); SY = r.sync; syncPicked.clear(); syncBadge(); if (route === 'sync') renderSync();
+  toast(on ? `اتستثنى ${ar.format(items.length)}: مش هيتزامن ومش هيتلمس` : 'اتشال الاستثناء');
+}
+let delItems = [];
+function askDelete(items, where, sides) {
+  delItems = items;
+  $('#delTitle').textContent = items.length === 1 ? 'تمسح الملف ده؟' : `تمسح ${ar.format(items.length)} ملفات؟`;
+  $('#delNames').innerHTML = items.slice(0, 5).map((r) => `<li>${esc(r.split('/').pop())}</li>`).join('') + (items.length > 5 ? `<li>و${ar.format(items.length - 5)} كمان</li>` : '');
+  $$('#delWhere input').forEach((i) => { i.disabled = !sides.includes(i.value); i.checked = i.value === where; });
+  $('#delKeep').checked = where !== 'both'; $('#delKeepRow').hidden = where === 'both';
+  $('#delDlg').showModal();
+}
+$$('#delWhere input').forEach((i) => i.addEventListener('change', () => { $('#delKeep').checked = i.value !== 'both'; $('#delKeepRow').hidden = i.value === 'both'; }));
+$('#delCancel').addEventListener('click', () => $('#delDlg').close());
+$('#delGo').addEventListener('click', async () => {
+  const where = $('#delWhere input:checked').value, keep = $('#delKeep').checked && where !== 'both', items = delItems;
+  $('#delGo').disabled = true;
+  try {
+    const r = await api('/api/delete', { method: 'POST', body: JSON.stringify({ items, where }) });
+    $('#delDlg').close(); syncPicked.clear();
+    if (keep && r.done.length) await api('/api/except', { method: 'POST', body: JSON.stringify({ items: r.done.map((d) => d.rel), on: true }) });
+    SY = await api('/api/sync?rescan'); syncBadge(); if (route === 'sync') renderSync(); load();
+    const back = r.done.filter((d) => d.macPath);
+    const msg = r.failed.length ? `اتمسح ${ar.format(r.done.length)}، ومتمسحش ${ar.format(r.failed.length)}: ${r.failed[0].why}` : `اتمسح ${ar.format(r.done.length)}`;
+    if (back.length === 1) toast(msg, 'رجّعه', () => restoreDeleted(back[0].id)); else toast(msg);
+  } catch (e) { toast(e.message); } finally { $('#delGo').disabled = false; }
+});
+async function restoreDeleted(id) {
+  try {
+    const r = await api('/api/deleted/restore', { method: 'POST', body: JSON.stringify({ id }) });
+    toast(r.driveTrash ? 'ده اتمسح من الدرايف بس، رجّعه من سلة Google Drive' : r.uploaded ? 'رجع مكانه' : 'رجع على الماك، بس لسه مترفعش على الدرايف');
+    SY = await api('/api/sync?rescan'); syncBadge(); if (route === 'sync') renderSync(); load();
+  } catch (e) { toast(e.message); }
+}
+function sidesOf(items) {
+  if (!SY) return ['both', 'mac', 'drive'];
+  const st = items.map((r) => SY.status?.[r]);
+  if (st.every((x) => x === 'local')) return ['mac'];
+  if (st.every((x) => x === 'drive')) return ['drive'];
+  return ['both', 'mac', 'drive'];
+}
+$('#syncAll').addEventListener('click', () => { const q = $('#syncQ').value.trim().toLowerCase(); (SY.lists[syncList] || []).filter((r) => !q || r.toLowerCase().includes(q)).slice(0, 200).forEach((r) => syncPicked.add(r)); renderSync(); });
+$('#syncClear').addEventListener('click', () => { syncPicked.clear(); renderSync(); });
+$('#syncExcept').addEventListener('click', () => setExcepted([...syncPicked], true).catch((e) => toast(e.message)));
+$('#syncDelete').addEventListener('click', () => { const items = [...syncPicked], sides = sidesOf(items); askDelete(items, sides[0], sides); });
+$('#dExcept').addEventListener('click', () => { $('#drawer').close(); setExcepted([current.rel], true).catch((e) => toast(e.message)); });
+$('#dDelete').addEventListener('click', () => { $('#drawer').close(); askDelete([current.rel], 'both', ['both', 'mac', 'drive']); });
+
 function renderSync() {
   if (!SY) return;
   if (SY.indexing && !renderSync.poll) renderSync.poll = setInterval(async () => { SY = await api('/api/sync'); syncBadge(); if (route === 'sync') renderSync(); if (!SY.indexing) { clearInterval(renderSync.poll); renderSync.poll = null; } }, 4000);
@@ -887,16 +954,25 @@ function renderSync() {
   $('.sync-flow').classList.toggle('busy', !!(S.job && !S.job.done && /push|pull|up|down/.test(S.job.action)));
   $('#autosync').checked = SY.auto;
   const q = $('#syncQ').value.trim().toLowerCase();
+  renderBulk();
+  if (syncList === 'deleted') return renderDeleted(q);
+  if (syncList === 'except') return renderExcepted(q);
   const rows = (SY.lists[syncList] || []).filter((r) => !q || r.toLowerCase().includes(q));
   $('#syncList').innerHTML = rows.length ? rows.slice(0, 200).map((r, n) => {
     const name = r.split('/').pop(), dir = r.split('/').slice(0, -1).join(' / '), id = SY.ids[r];
-    return `<li style="--i:${Math.min(n, 25)}"><div>${statusChip(syncList)}<b>${esc(name)}</b><small>${esc(dir)}</small></div><span class="row-actions">${syncList === 'drive' ? `<button class="btn ghost small" data-sdown="${esc(r)}">نزّله</button>` : `<button class="btn ghost small" data-sup="${esc(r)}">ارفعه</button>`}${id ? `<a class="btn ghost small" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${id}/view">Drive</a>` : ''}</span></li>`;
-  }).join('') : `<li class="empty-state">${EMPTY}<span>${syncList === 'local' ? 'كل اللي على الماك موجود على الدرايف ✓' : syncList === 'drive' ? 'مفيش حاجة على الدرايف ناقصة من الماك ✓' : 'مفيش ملفات حجمها مختلف ✓'}</span></li>`;
+    return `<li style="--i:${Math.min(n, 25)}"><input type="checkbox" class="sync-pick" data-pick="${esc(r)}" aria-label="حدد ${esc(name)}"${syncPicked.has(r) ? ' checked' : ''}><div>${statusChip(syncList)}<b>${esc(name)}</b><small>${esc(dir)}${SY.sizes?.[r] ? ` · ${fmtSize(SY.sizes[r])}` : ''}</small></div><span class="row-actions"><button class="btn ghost small" data-sex="${esc(r)}">استثني</button><button class="btn ghost small danger" data-sdel="${esc(r)}">امسح</button>${syncList === 'both' ? '' : syncList === 'drive' ? `<button class="btn ghost small" data-sdown="${esc(r)}">نزّله</button>` : `<button class="btn ghost small" data-sup="${esc(r)}">ارفعه</button>`}${id ? `<a class="btn ghost small" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${id}/view">Drive</a>` : ''}</span></li>`;
+  }).join('') : `<li class="empty-state">${EMPTY}<span>${syncList === 'local' ? 'كل اللي على الماك موجود على الدرايف ✓' : syncList === 'drive' ? 'مفيش حاجة على الدرايف ناقصة من الماك ✓' : syncList === 'both' ? 'مفيش ملفات بالاسم ده' : 'مفيش ملفات حجمها مختلف ✓'}</span></li>`;
 }
-$('#syncTabs').addEventListener('click', (e) => { const c = e.target.closest('[data-l]'); if (!c) return; syncList = c.dataset.l; $$('#syncTabs .chip').forEach((x) => x.classList.toggle('on', x === c)); renderSync(); });
-$$('.stat[data-list]').forEach((b) => b.addEventListener('click', () => { if (b.dataset.list === 'both') return; $(`#syncTabs [data-l="${b.dataset.list}"]`).click(); $('#syncList').scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+$('#syncTabs').addEventListener('click', (e) => { const c = e.target.closest('[data-l]'); if (!c) return; syncList = c.dataset.l; syncPicked.clear(); $$('#syncTabs .chip').forEach((x) => x.classList.toggle('on', x === c)); renderSync(); });
+$$('.stat[data-list]').forEach((b) => b.addEventListener('click', () => { $(`#syncTabs [data-l="${b.dataset.list}"]`).click(); $('#syncList').scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
 $('#syncQ').addEventListener('input', renderSync);
+$('#syncList').addEventListener('change', (e) => { const r = e.target.dataset.pick; if (!r) return; if (e.target.checked) syncPicked.add(r); else syncPicked.delete(r); renderBulk(); });
 $('#syncList').addEventListener('click', (e) => {
+  const { sdel, sex, sunex, srestore } = e.target.dataset;
+  if (sdel) { const sides = sidesOf([sdel]); return askDelete([sdel], sides[0], sides); }
+  if (sex) return setExcepted([sex], true).catch((err) => toast(err.message));
+  if (sunex) return setExcepted([sunex], false).catch((err) => toast(err.message));
+  if (srestore) return restoreDeleted(srestore);
   const up = e.target.dataset.sup, dn = e.target.dataset.sdown; if (!up && !dn) return;
   runSync('/api/sync/file', { rel: up || dn, dir: up ? 'up' : 'down' }, up ? 'up' : 'down');
 });
