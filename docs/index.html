@@ -16,12 +16,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&text=Morfi&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="splash" id="splash" aria-hidden="true">
   <svg viewBox="0 0 512 512" width="96" height="96"><rect width="512" height="512" rx="112" fill="#272339"/><rect class="sb s1" x="88" y="150" width="336" height="44" rx="22" fill="#a593ff"/><rect class="sb s2" x="88" y="234" width="236" height="44" rx="22" fill="#39c9b2"/><rect class="sb s3" x="88" y="318" width="290" height="44" rx="22" fill="#f3b33f"/><g class="sph"><rect x="268" y="96" width="14" height="330" rx="7" fill="#ff5d6c"/><path d="M245 82h60l-30 38z" fill="#ff5d6c"/></g></svg>
   <p>غرفة تحكم المحاضرات</p>
+  <div class="welcome" id="welcome" hidden><h2></h2><p></p><small></small></div>
 </div>
 <dialog class="palette" id="palette" aria-label="الأوامر">
   <input id="palInput" placeholder="اكتب أمر أو اسم محاضرة…" autocomplete="off">
@@ -140,7 +142,7 @@
             <h2 id="consoleTitle">الشاشة</h2>
             <div class="row-actions"><span class="state" id="jobState">مستني أمر</span><button class="btn ghost small" id="cancelJob" hidden>وقّف</button></div>
           </div>
-          <pre id="log" aria-live="polite"></pre>
+          <div id="log" class="feed" aria-live="polite"></div>
           <ul class="wait-list" id="waitList" hidden></ul>
         </div>
 
@@ -150,6 +152,12 @@
             <div class="row-actions"><span class="state" id="wState">…</span><button class="btn small" id="wRun" data-tip="يسحب الجديد ويعمل كل الناقص ويرفعه دلوقتي">اشتغل دلوقتي</button></div>
           </div>
           <p class="muted small" id="wStep"></p>
+          <ol class="flow" id="wFlow" aria-label="مراحل الشغل">
+            <li data-s="sort"><b>ترتيب وتسمية</b><small id="wFlowNot">Not summarized</small></li>
+            <li data-s="slides"><b>سلايدز</b><small>في Zen</small></li>
+            <li data-s="push"><b>رفع</b><small>على الدرايف</small></li>
+            <li data-s="finish"><b>خلصت</b><small id="wFlowDone">summarized</small></li>
+          </ol>
           <div class="warn" id="wSignin" hidden><b>العامل مستني Zen</b><p>العامل بيشتغل من Zen بتاعك، بس Zen لازم يتفتح بإعداد العامل. الزرار هيقفل Zen ويفتحه تاني، والتابات بترجع زي ما هي.</p><button class="btn small" id="wSigninBtn">افتح Zen من جديد للعامل</button></div>
           <ol class="task-list" id="wTasks"></ol>
         </div>
@@ -374,7 +382,32 @@
       </section>
     </main>
 
-    <footer>Designed &amp; developed by <a href="https://morfi28i.github.io/portfolio/" target="_blank" rel="noopener">Morfi</a></footer>
+    <footer class="credit" id="credit">
+      <div class="cr-side">
+        <p>Designed &amp; developed by</p>
+        <p class="cr-roles"><span>Motion designer</span><span>Video editor</span><span>Web developer</span></p>
+      </div>
+      <a class="cr-word" href="https://morfi28i.github.io/portfolio/" target="_blank" rel="noopener" aria-label="Morfi, open the portfolio">
+        <svg viewBox="-3 30 650 308" aria-hidden="true">
+          <defs>
+            <linearGradient id="crBody" x1="0" y1="0" x2="0" y2="1"><stop class="s-a" offset="0"/><stop class="s-b" offset="1"/></linearGradient>
+            <radialGradient id="crSpot" gradientUnits="userSpaceOnUse" cx="322" cy="180" r="240"><stop class="s-ink" offset="0"/><stop class="s-acc" offset=".38"/><stop class="s-none" offset="1"/></radialGradient>
+            <filter id="crEdge" x="-2%" y="-3%" width="104%" height="106%"><feMorphology in="SourceAlpha" operator="dilate" radius="1" result="fat"/><feComposite in="fat" in2="SourceAlpha" operator="out" result="edge"/><feFlood class="s-edge"/><feComposite in2="edge" operator="in"/></filter>
+          </defs>
+          <text class="cr-t cr-body" x="0" y="250">Morfi</text>
+          <text class="cr-t cr-edge" x="0" y="250">Morfi</text>
+          <text class="cr-t cr-light" x="0" y="250">Morfi</text>
+        </svg>
+      </a>
+      <div class="cr-side cr-end">
+        <a class="cr-btn" href="https://morfi28i.github.io/portfolio/" target="_blank" rel="noopener">See the portfolio</a>
+        <nav aria-label="Morfi on social media">
+          <a href="https://www.instagram.com/morfi.28i" target="_blank" rel="noopener">Instagram</a>
+          <a href="https://www.youtube.com/@Morfi.28" target="_blank" rel="noopener">YouTube</a>
+          <a href="https://www.facebook.com/morfi.28i" target="_blank" rel="noopener">Facebook</a>
+        </nav>
+      </div>
+    </footer>
   </div>
 </div>
 

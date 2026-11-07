@@ -1,6 +1,7 @@
 // Lectures control room: a local-only dashboard + control API for the lectures automation kit.
 // Run: node ~/.lectures-automation/dashboard/server.mjs   →  http://localhost:4545
 // Listens on 127.0.0.1 only, accepts requests only from its own page, and works inside ~/Desktop/محاضرات.
+import net from 'node:net';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,6 +9,8 @@ import os from 'node:os';
 import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { load as settings, save as saveSettings, SCHEMA, GROUPS } from '../settings.mjs';
+// behind a VPN the default 250 ms per address makes every fetch time out, while curl and rclone work fine
+net.setDefaultAutoSelectFamilyAttemptTimeout(2500);
 
 const PORT = Number(process.env.PORT || 4545);
 const HOME = os.homedir();

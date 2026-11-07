@@ -324,7 +324,7 @@ function renderHistory() {
         : a.type === 'account' ? `أكونت ${a.email || a.n}: ${a.limited ? 'وصل للحد' : 'رجع متاح'}` : a.type === 'account-onoff' ? `أكونت ${a.email}: ${a.on ? 'اتفتح للعامل' : 'اتقفل للعامل'}` : a.type === 'zen-restart' ? 'العامل أعاد فتح Zen' : a.type === 'renamed' ? `اتسمّى: ${a.to}` : a.type === 'settings' ? 'التخصيص اتغيّر' : a.type === 'make' ? 'طلب سلايدز من العامل' : a.type === 'worker-run' ? 'العامل اشتغل دلوقتي' : a.type === 'downloads-trash' ? 'تنزيلات بايظة راحت الـ Trash' : a.type,
       d: a.file || a.rel || (a.files ? `${ar.format(a.files)} ملف` : '') || (a.tail || []).slice(-2).join(' / '),
     })),
-  ].filter((r) => histFilter === 'all' || r.k === histFilter).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 60);
+  ].filter((r) => (histFilter === 'all' || r.k === histFilter) && Date.now() - Date.parse(r.at) < (SET['worker.keepDays'] || 7) * 864e5).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 60);
   $('#history').innerHTML = rows.length
     ? rows.map((r, n) => `<li style="--c:${r.c};--i:${Math.min(n, 20)}"><div><b>${esc(r.t)}</b><small>${esc(r.d || '')}</small></div><time>${dayTime.format(new Date(r.at))}</time></li>`).join('')
     : `<li class="empty-state">${EMPTY}<span>مفيش حاجة هنا لسه.</span></li>`;
@@ -345,27 +345,73 @@ function readableStats(line) {
     return kb < 100 ? `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB${rate}` : `${(kb / 1024).toFixed(2)} MB${rate}`;
   });
 }
-function logLine(text, stats) {
-  const box = $('#log'), bottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40, last = box.lastElementChild;
-  // rclone's progress is one line that keeps updating at the end of the screen
-  if (stats && last?.classList.contains('stats')) { last.textContent = readableStats(text); if (bottom) box.scrollTop = box.scrollHeight; return; }
-  const el = document.createElement('span'); el.className = stats ? 'l stats' : 'l'; el.textContent = readableStats(text);
-  if (!stats && last?.classList.contains('stats')) box.insertBefore(el, last); else box.append(el);
-  while (box.children.length > 400) box.firstElementChild.remove();
+// the screen: every event is one row with its kind, and a repeated event only counts up
+const FEED_ICON = {
+  done: 'm5 12 4 4 10-10', bad: 'M12 8v5m0 3.5v.5M12 3 2 20h20z', work: 'M4 5h16v11H4zM12 16v4M8 20h8',
+  sort: 'M4 6h16M7 12h10M10 18h4', wait: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2', step: 'm15 6-6 6 6 6',
+};
+const FEED_KIND = [
+  [/مشكلة|ERROR|FAILED|مقدرتش|معرفتش|فشل/, 'bad'], [/^(اتحط|خلص|اترفع|اتنقل|moved|عملت)/, 'done'],
+  [/^(اترتّب|اتسمّى|اتصلّح|راح الـ Trash|لقيت)/, 'sort'], [/أكونت|السلايدز|نوت بوك|بيشتغل|بيكمّل/, 'work'],
+  [/مفيش جديد|ناقصها|مستني/, 'wait'],
+];
+function feedRow(time, full, msg) {
+  const box = $('#log'), bottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const rows = box.querySelectorAll('.l:not(.stats)'), last = rows[rows.length - 1];
+  if (last?.dataset.msg === msg) {
+    last.dataset.n = +last.dataset.n + 1; last.querySelector('em').textContent = `${last.dataset.n} مرات`;
+    last.querySelector('time').textContent = time; last.querySelector('time').title = full;
+  } else {
+    const kind = FEED_KIND.find(([re]) => re.test(msg))?.[1] || 'step', i = msg.indexOf(': ');
+    const el = document.createElement('div'); el.className = `l k-${kind}`; el.dataset.msg = msg; el.dataset.n = 1;
+    el.innerHTML = `<time></time><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${FEED_ICON[kind]}"/></svg><span class="m"><b></b><bdi dir="auto"></bdi></span><em></em>`;
+    el.querySelector('time').textContent = time; el.querySelector('time').title = full;
+    el.querySelector('b').textContent = i > 0 ? msg.slice(0, i) : msg; el.querySelector('bdi').textContent = i > 0 ? msg.slice(i + 2) : '';
+    const stats = box.querySelector('.stats');
+    if (stats) box.insertBefore(el, stats); else box.append(el);
+    while (box.children.length > 400) box.firstElementChild.remove();
+  }
   if (bottom) box.scrollTop = box.scrollHeight;
 }
-// log lines carry UTC times and task ids; the screen shows local time and plain words
-function liveLine(line) {
-  const m = line.match(/^(?:\[\w+\] )?(\d\d):(\d\d):(\d\d) (.*)$/); if (!m) return line;
-  const d = new Date(); d.setUTCHours(+m[1], +m[2], +m[3]);
-  return `${d.toLocaleTimeString('en-GB')}  ${m[4].replace(/PENDING: /g, 'ناقصها سلايدز: ').replace(/ \| ملخص وأهم النقاط \(سلايدز\)/g, '')}`;
+// log lines carry UTC times, task ids and rclone's wording; the screen shows local time and plain words
+function liveRow(line) {
+  if (/NOTICE/.test(line)) return;
+  const m = line.match(/^(?:\[\w+\] )?(\d\d):(\d\d):(\d\d) (.*)$/);
+  const d = new Date(); if (m) d.setUTCHours(+m[1], +m[2], +m[3]);
+  const msg = (m ? m[4] : line)
+    .replace(/^\S+ \S+ INFO\s*:\s*(.+): (Copied|Moved)[^:]*$/, 'اترفع: $1')
+    .replace(/PENDING: /g, 'ناقصها سلايدز: ').replace(/ \| ملخص وأهم النقاط \(سلايدز\)/g, '')
+    .replace('السلايدز: EN:ok AR:ok', 'اتطلبت السلايدز: الأصل والعربي').trim();
+  if (msg) feedRow(d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }), d.toLocaleTimeString('en-GB'), msg);
+}
+// rclone's progress is one row with a bar that keeps updating at the end of the screen
+function statsRow(line) {
+  const box = $('#log'), bottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const m = readableStats(line).match(/([\d.]+ [KM]B) \/ ([\d.]+ [KM]B), (\d+)%, ([\d.]+ [KM]B\/s), ETA (\S+)/); if (!m) return;
+  let el = box.querySelector('.stats');
+  if (!el) { el = document.createElement('div'); el.className = 'l stats'; el.innerHTML = '<div class="st-top"><b></b><span dir="ltr"></span></div><div class="st-bar"><i></i></div><small></small>'; box.append(el); }
+  el.querySelector('b').textContent = `${m[3]}%`; el.querySelector('.st-top span').textContent = `${m[1]} / ${m[2]}`;
+  el.querySelector('i').style.width = `${m[3]}%`;
+  el.querySelector('small').textContent = `السرعة ${m[4]}، فاضل ${m[5].replace('h', ' س ').replace('m', ' د ').replace('s', ' ث')}`;
+  if (bottom) box.scrollTop = box.scrollHeight;
+}
+// the worker card's stages: what is moving now, and how many lectures sit on each side
+const FLOW_STEP = [[/بيبدأ|يسحب|يرتّب|يقارن/, 'sort'], [/بيشتغل على|السلايدز/, 'slides']], FLOW_JOB = { pull: 'sort', push: 'push', pushall: 'push', finish: 'finish' };
+function renderFlow(worker) {
+  const job = S?.job && !S.job.done ? FLOW_JOB[S.job.action] : null;
+  const now = job || (worker.state === 'working' ? FLOW_STEP.find(([re]) => re.test(worker.step || ''))?.[1] : null);
+  $$('#wFlow li').forEach((li) => li.classList.toggle('now', li.dataset.s === now));
+  if (!S?.items) return;
+  const lectures = S.items.filter((i) => i.inUnsorted && i.lecture), done = lectures.filter((i) => i.rel.startsWith('unsorted/summarized/')).length;
+  $('#wFlowNot').textContent = `Not summarized: ${lectures.length - done}`; $('#wFlowDone').textContent = `summarized: ${done}`;
 }
 let liveFrom = null, workerShown = false;
 async function followLive() {
   if (document.hidden) return;
   try {
     const r = await api('/api/live' + (liveFrom === null ? '' : `?from=${liveFrom}`));
-    liveFrom = r.offset; r.lines.forEach((l) => logLine(liveLine(l)));
+    liveFrom = r.offset; r.lines.forEach(liveRow);
+    renderFlow(r.worker);
     if (streaming) return;
     const st = $('#jobState'), busy = r.worker.state === 'working';
     if (busy) { st.className = 'state busy'; st.textContent = 'العامل: ' + (r.worker.step || 'شغّال'); } else if (workerShown) { st.className = 'state ok'; st.textContent = 'مستني'; }
@@ -377,7 +423,7 @@ function attach(action) {
   streaming = true; setBusy(action);
   const st = $('#jobState'); st.className = 'state busy'; st.textContent = 'شغّال: ' + (ACTION_NAME[action] || action);
   const es = new EventSource(API + '/api/job/stream');
-  es.onmessage = (e) => { const { line } = JSON.parse(e.data); if (/\bETA\b/.test(line)) logLine(line, true); };
+  es.onmessage = (e) => { const { line } = JSON.parse(e.data); if (/\bETA\b/.test(line)) statsRow(line); };
   es.addEventListener('end', (e) => {
     const { code } = JSON.parse(e.data); es.close(); streaming = false; setBusy(null);
     $('#log .stats')?.remove();
@@ -598,7 +644,40 @@ function fxLoop() {
 
 // splash: fades out once the first data is in
 const splashT0 = performance.now();
-function hideSplash() { setTimeout(() => $('#splash').classList.add('gone'), Math.max(0, 1100 - (performance.now() - splashT0))); }
+// once an hour the splash stays for a welcome: a new line each hour, plus where the lectures stand right now
+const WELCOME = [
+  'المحاضرات مترتبة ومستنياك، ابدأ من اللي عايزه.',
+  'العامل شغال في الخلفية، وإنت ركّز في الحاجة الأهم.',
+  'خطوة صغيرة دلوقتي أحسن من مذاكرة كتير بعدين.',
+  'كل ملف ليه مكانه، ولو لسه ملوش العامل هيلاقيله.',
+  'النهارده مناسب تخلّص حاجة كنت مأجلها.',
+  'السلايدز بتتعمل لوحدها، وإنت عليك تفهم بس.',
+  'بص على الوارد، يمكن حاجة جديدة نزلت.',
+  'الدرايف والماك بيتقارنوا، فاطمن على ملفاتك.',
+  'محاضرة واحدة كاملة أحسن من تلاتة نص نص.',
+  'لو حاجة وقفت هتلاقيها قدامك في الشاشة على طول.',
+  'خد نفس، وابدأ بأسهل مادة النهارده.',
+  'شغل كتير اتعمل وإنت مش هنا، بص عليه.',
+];
+function welcome() {
+  try { if (reduced || Date.now() - (+localStorage.getItem('welcomeAt') || 0) < 36e5) return false; localStorage.setItem('welcomeAt', Date.now()); } catch { return false; }
+  const box = $('#welcome'), h = new Date().getHours(), lectures = S?.items?.filter((i) => i.lecture) || [], todo = lectures.filter((i) => i.missing.length).length;
+  box.querySelector('h2').textContent = h < 5 ? `سهران يا ${NAME()}؟` : h < 12 ? `صباح الخير يا ${NAME()}` : h < 17 ? `يومك حلو يا ${NAME()}` : `مساء الخير يا ${NAME()}`;
+  const line = box.querySelector('p'); line.textContent = '';
+  WELCOME[Math.floor(Date.now() / 36e5) % WELCOME.length].split(' ').forEach((w, i) => { const el = document.createElement('span'); el.textContent = w + ' '; el.style.setProperty('--i', i); line.append(el); });
+  box.querySelector('small').textContent = !lectures.length ? '' : todo ? `${lectures.length} محاضرة، ${todo} منهم ناقصهم سلايدز` : `${lectures.length} محاضرة، كلهم جاهزين`;
+  box.hidden = false; $('#splash').classList.add('welcoming');
+  return true;
+}
+function hideSplash() {
+  if (hideSplash.done) return; hideSplash.done = true;
+  const gone = () => $('#splash').classList.add('gone');
+  setTimeout(() => {
+    if (!welcome()) return gone();
+    const t = setTimeout(gone, 4600);
+    $('#splash').addEventListener('click', () => { clearTimeout(t); gone(); }, { once: true });
+  }, Math.max(0, 1100 - (performance.now() - splashT0)));
+}
 
 
 // command palette: jump anywhere or run anything from the keyboard
@@ -994,3 +1073,35 @@ $('#moreBtn').addEventListener('click', () => $('#moreSheet').showModal());
 $('#moreSheet').addEventListener('click', (e) => { if (e.target === e.currentTarget || e.target.closest('a')) e.currentTarget.close(); });
 const markMore = () => { const r = (location.hash.match(/^#\/(\w+)/) || [])[1]; $('#moreBtn').classList.toggle('on', MORE.includes(r)); $$('#moreLinks a').forEach((a) => a.classList.toggle('on', a.dataset.route === r)); };
 addEventListener('hashchange', markMore); markMore();
+
+// the footer is an end credit: the name draws itself when it scrolls into view, then a light travels across it
+(function credit() {
+  const box = $('#credit'), spot = $('#crSpot'), word = box.querySelector('svg'), btn = box.querySelector('.cr-btn'), roles = [...box.querySelectorAll('.cr-roles span')];
+  const V = word.viewBox.baseVal; let role = 0; roles[0].classList.add('on');
+  const place = (x, y) => { spot.setAttribute('cx', x); spot.setAttribute('cy', y); box.style.setProperty('--sx', `${(x - V.x) / V.width * 100}%`); };
+  if (reduced) return;
+  box.classList.add('ready');
+  let pointer = null, visible = false, raf;
+  function light(t) { if (pointer) place(pointer.x, pointer.y); else place(V.x + V.width * (.5 + .44 * Math.sin(t / 2600)), V.y + V.height * (.5 + .22 * Math.cos(t / 1700))); if (visible) raf = requestAnimationFrame(light); }
+  new IntersectionObserver((es) => {
+    visible = es[0].isIntersecting; cancelAnimationFrame(raf);
+    if (!visible) return;
+    box.classList.remove('play'); void box.offsetWidth; box.classList.add('play'); raf = requestAnimationFrame(light);
+  }, { threshold: .35 }).observe(box);
+  box.addEventListener('pointermove', (e) => {
+    const r = word.getBoundingClientRect(); pointer = { x: V.x + (e.clientX - r.left) / r.width * V.width, y: V.y + (e.clientY - r.top) / r.height * V.height };
+    const b = btn.getBoundingClientRect(), dx = e.clientX - (b.left + b.width / 2), dy = e.clientY - (b.top + b.height / 2), near = e.pointerType === 'mouse' && Math.hypot(dx, dy) < 110;
+    btn.style.transform = near ? `translate(${dx * .22}px, ${dy * .3}px)` : '';
+  });
+  box.addEventListener('pointerleave', () => { pointer = null; btn.style.transform = ''; });
+  setInterval(() => { if (!visible) return; roles[role].classList.remove('on'); role = (role + 1) % roles.length; roles[role].classList.add('on'); }, 2400);
+})();
+
+// cards rise into place as they scroll into view, on every page
+(function reveal() {
+  if (reduced) return;
+  const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('seen'); io.unobserve(e.target); } }), { rootMargin: '0px 0px -5% 0px' });
+  const scan = () => $$('#view .card:not(.glow-border):not(.rv), #view .kpis > :not(.rv), #view .charts > :not(.rv)').forEach((el) => { el.classList.add('rv'); io.observe(el); });
+  let queued; new MutationObserver(() => { if (!queued) queued = requestAnimationFrame(() => { queued = 0; scan(); }); }).observe($('#view'), { childList: true, subtree: true });
+  scan();
+})();
