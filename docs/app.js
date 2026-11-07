@@ -402,8 +402,7 @@ function renderFlow(worker) {
   const now = job || (worker.state === 'working' ? FLOW_STEP.find(([re]) => re.test(worker.step || ''))?.[1] : null);
   $$('#wFlow li').forEach((li) => li.classList.toggle('now', li.dataset.s === now));
   if (!S?.items) return;
-  const lectures = S.items.filter((i) => i.inUnsorted && i.lecture), done = lectures.filter((i) => i.rel.startsWith('unsorted/summarized/')).length;
-  $('#wFlowNot').textContent = `Not summarized: ${lectures.length - done}`; $('#wFlowDone').textContent = `summarized: ${done}`;
+  $('#wFlowNot').textContent = `Not summarized: ${S.items.filter((i) => i.inUnsorted && i.lecture && !i.rel.startsWith('unsorted/summarized/')).length}`;
 }
 let liveFrom = null, workerShown = false;
 async function followLive() {

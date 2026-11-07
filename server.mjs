@@ -124,7 +124,7 @@ const ACTIONS = {
   runnow: { label: 'تشغيل الخطوات دلوقتي', drive: true, cmd: ['sh', ['-c', `sh "${path.join(KIT, 'inbox.sh')}"; echo "— رفع —"; sh "${path.join(KIT, 'push.sh')}"; echo "خلص"`]] },
   pushall: { label: 'رفع كل الجديد من الماك على الدرايف', drive: true, transfer: true, cmd: (mode) => ['rclone', ['copy', ROOT, REMOTE, ...tune(upFlags(), mode), ...chunk(mode), '--low-level-retries', '30', '-v', '--stats-one-line', '--stats', '15s']] },
   pullall: { label: 'تنزيل الجديد من الدرايف على الماك', drive: true, transfer: true, cmd: (mode) => ['rclone', ['copy', REMOTE, ROOT, '--ignore-existing', ...excludes(), ...tune(['--tpslimit', String(settings()['drive.tpslimit'] * 2), '--transfers', '4'], mode), '-v', '--stats-one-line', '--stats', '15s']] },
-  finish: { label: 'نقل اللي خلص لـ summarized', drive: true, cmd: ['sh', [path.join(KIT, 'finish.sh')]] },
+  finish: { label: 'نقل اللي خلص لمكانه الأساسي', drive: true, cmd: ['sh', [path.join(KIT, 'finish.sh')]] },
   // read only: lists files that share a name inside the same Drive folder, changes nothing
   dupes: { label: 'دوّر على ملفات مكررة على الدرايف', cmd: ['rclone', ['dedupe', '--dedupe-mode', 'list', REMOTE, '--tpslimit', '2']] }, // read only
 };
@@ -266,8 +266,8 @@ function watchSpeed(j, line) {
 }
 // what each fix does, in order; Morfi sees every step in the console
 const FIXES = [
-  ['normal', 'بعيد تشغيل الرفع من مكانه (rclone بيبدأ من جديد ومبيعيدش اللي خلص)'],
   ['gentle', 'بهدّي الطلبات: ملف واحد في المرة وطلب واحد في الثانية، عشان Google ترجع تدينا سرعة'],
+  ['normal', 'بعيد تشغيل الرفع من مكانه (rclone بيبدأ من جديد ومبيعيدش اللي خلص)'],
   ['chunks', 'بكبّر حتة الرفع لـ 64MB عشان الملفات الكبيرة تمشي أسرع'],
   ['cooldown', 'Google بتبطّأنا: هريّح شوية وأرجع أكمّل'],
   ['gentle', 'آخر محاولة: هادي وبطيء بس مستمر'],
