@@ -894,15 +894,17 @@ dialog.sheet[open] { transform: none; }
 
 /* the footer credit: one small capsule, centred */
 .credit { display: grid; place-items: center; margin-top: 1rem; padding: 1.4rem 1rem 1.8rem; direction: ltr; }
-.cap { display: inline-flex; align-items: center; gap: .7rem; max-width: 100%; padding: .4rem 1.15rem .4rem .45rem; border-radius: 99px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: .8rem; text-decoration: none; transition: border-color .25s, transform .35s var(--ease), box-shadow .3s; }
+.cap { display: inline-flex; align-items: center; gap: .65rem; max-width: 100%; padding: .35rem .4rem .35rem .35rem; border-radius: 99px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: .8rem; text-decoration: none; transition: border-color .25s, transform .35s var(--ease), box-shadow .3s; }
 .cap:hover { border-color: var(--acc); transform: translateY(-2px); box-shadow: 0 10px 26px -14px var(--acc); }
 .cap:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; }
-.cap-mark { flex: none; display: grid; place-items: center; width: 2.35rem; height: 2.35rem; border-radius: 50%; background: var(--acc); color: var(--bg); font: 700 1.65rem/1 "Dancing Script", cursive; transition: transform .45s var(--ease); }
+.cap-mark { flex: none; display: grid; place-items: center; width: 2.2rem; height: 2.2rem; border-radius: 50%; background: var(--acc); color: var(--bg); font: 700 1.5rem/1 "Dancing Script", cursive; transition: transform .45s var(--ease); }
 .cap:hover .cap-mark { transform: rotate(-10deg) scale(1.08); }
-.cap-rest { display: flex; align-items: center; flex-wrap: wrap; gap: .1rem .7rem; min-width: 0; }
-.cap-name { font: 700 1.6rem/1.15 "Dancing Script", cursive; color: var(--ink); }
+.cap-rest { display: flex; align-items: center; gap: .65rem; min-width: 0; }
+.cap-name { font: 700 1.5rem/1 "Dancing Script", cursive; color: var(--ink); padding-bottom: .1rem; }
+.cap-by { white-space: nowrap; }
 .cap-rest i { width: 1px; height: 1.2rem; background: var(--line); }
-.cap-link { color: var(--acc); font-weight: 500; }
+.cap-link { padding: .4rem .85rem; border-radius: 99px; background: color-mix(in srgb, var(--acc) 15%, transparent); color: var(--acc); font-weight: 500; white-space: nowrap; transition: background-color .25s, color .25s; }
+.cap:hover .cap-link { background: var(--acc); color: var(--bg); }
 .credit.ready:not(.play) .cap { opacity: 0; }
 .credit.play .cap { animation: capIn .6s var(--ease) both; }
 .credit.play .cap-mark { animation: capMark .7s var(--ease) both; }
@@ -910,7 +912,7 @@ dialog.sheet[open] { transform: none; }
 @keyframes capIn { from { opacity: 0; transform: scale(.9); } }
 @keyframes capMark { from { transform: rotate(-90deg) scale(.6); } }
 @keyframes capOpen { from { clip-path: inset(-20% 100% -20% 0); opacity: 0; } to { clip-path: inset(-20% -5% -20% 0); opacity: 1; } }
-@media (max-width: 480px) { .cap-rest i { display: none; } .cap { border-radius: 26px; } }
+@media (max-width: 480px) { .cap-rest { display: grid; grid-template-columns: auto auto; gap: 0 .7rem; } .cap-rest i { display: none; } .cap-name { grid-area: 1 / 1; justify-self: start; } .cap-by { grid-area: 2 / 1; font-size: .7rem; } .cap-link { grid-area: 1 / 2 / 3 / 3; align-self: center; } }
 
 /* cards rise as they scroll into view */
 .rv:not(.seen) { opacity: 0; }
